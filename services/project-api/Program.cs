@@ -1,5 +1,6 @@
 // Project API (ТЗ 5.2). Этап 1: проекты, загрузка видео в S3 по presigned URL (multipart с докачкой),
 // публикация video.uploaded / script.uploaded, список сцен, статусы через SignalR.
+// Этап 4: монтажный лист — правки строк с row_version, split/merge, перезапуск без потери правок.
 using System.Text.Json;
 using Cutsheet.Messaging;
 using Cutsheet.ProjectApi;
@@ -12,6 +13,7 @@ var config = builder.Configuration;
 builder.Services.AddSingleton<EventBus>();
 builder.Services.AddSingleton(Postgres.CreateDataSource(config));
 builder.Services.AddSingleton<ProjectStore>();
+builder.Services.AddSingleton<SheetStore>();
 builder.Services.AddSingleton<ObjectStorage>();
 builder.Services.AddSingleton<JwtKeys>();
 builder.Services.AddHostedService<StatusConsumer>();
@@ -67,9 +69,9 @@ var projects = api.MapGroup("/projects").RequireAuthorization();
 projects.MapGet("/", Endpoints.ListProjects);
 projects.MapPost("/", Endpoints.CreateProject);
 projects.MapGet("/{id:guid}", Endpoints.GetProject);
-projects.MapGet("/{id:guid}/scenes", Endpoints.GetScenes);
 projects.MapPost("/{id:guid}/uploads", Endpoints.StartUpload);
 projects.MapGet("/{id:guid}/uploads/{uploadId:guid}", Endpoints.GetUpload);
 projects.MapPost("/{id:guid}/uploads/{uploadId:guid}/complete", Endpoints.CompleteUpload);
+SheetEndpoints.Map(projects);
 
 app.Run();

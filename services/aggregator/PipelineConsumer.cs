@@ -71,22 +71,13 @@ public sealed class PipelineConsumer(EventBus bus, NpgsqlDataSource db, Dialogue
 
         await Exec(conn, tx, "UPDATE projects SET fps = $2, duration_ms = $3 WHERE id = $1", ct,
             e.ProjectId, p.GetProperty("fps").GetDouble(), p.GetProperty("duration_ms").GetInt64());
-        // Повторная детекция заменяет сцены целиком. Сохранение правок при перезапуске — этап 4 (FR-A5).
-        await Exec(conn, tx, "DELETE FROM scenes WHERE project_id = $1", ct, e.ProjectId);
-
-        foreach (var scene in scenes.EnumerateArray())
-        {
-            var sceneId = Guid.NewGuid();
-            await Exec(conn, tx,
-                "INSERT INTO scenes (id, project_id, idx, start_ms, end_ms) VALUES ($1, $2, $3, $4, $5)", ct,
-                sceneId, e.ProjectId, scene.GetProperty("index").GetInt32(),
-                scene.GetProperty("start_ms").GetInt64(), scene.GetProperty("end_ms").GetInt64());
-            var position = 0;
-            foreach (var uri in scene.GetProperty("keyframe_uris").EnumerateArray())
-                await Exec(conn, tx,
-                    "INSERT INTO scene_keyframes (scene_id, position, s3_uri) VALUES ($1, $2, $3)", ct,
-                    sceneId, position++, uri.GetString()!);
-        }
+        var detected = scenes.EnumerateArray().Select(scene => new DetectedScene(
+            scene.GetProperty("index").GetInt32(), scene.GetProperty("start_ms").GetInt64(),
+            scene.GetProperty("end_ms").GetInt64(),
+            scene.GetProperty("keyframe_uris").EnumerateArray().Select(u => u.GetString()!).ToList())).ToList();
+        var result = await SceneSync.ApplyAsync(conn, tx, e.ProjectId, detected, ct);
+        if (result == SceneSync.Result.KeptUserStructure)
+            Log.LogInformation("project {ProjectId}: scene structure edited by user, re-detection keeps it", e.ProjectId);
 
         await Exec(conn, tx, """
             INSERT INTO pipeline_state (project_id, correlation_id, scenes_detected, stage, error, updated_at)

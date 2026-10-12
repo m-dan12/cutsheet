@@ -1,7 +1,7 @@
 COMPOSE = docker compose -f deploy/docker-compose.yml
 PY ?= python3
 
-.PHONY: up down logs ps dev-install test test-contracts test-python test-dotnet sample sample-script e2e e2e-kafka e2e-dialogues e2e-enrichment
+.PHONY: up down logs ps dev-install test test-contracts test-python test-dotnet sample sample-script e2e e2e-kafka e2e-dialogues e2e-enrichment e2e-editing
 
 up:            ## поднять всё окружение
 	$(COMPOSE) up -d --build
@@ -33,8 +33,9 @@ test-python:
 	$(PY) -m pytest -q services/shot-type/tests
 	$(PY) -m pytest -q services/scene-description/tests
 
-test-dotnet:   ## unit-тесты Aggregator; с CUTSHEET_TEST_PG — и тесты join на PostgreSQL
+test-dotnet:   ## unit-тесты C#; с CUTSHEET_TEST_PG — и тесты на PostgreSQL (join, правки листа)
 	dotnet test services/aggregator-tests
+	dotnet test services/project-api-tests
 
 sample:        ## тестовый ролик 9 с с тремя склейками
 	sh tools/make_sample_video.sh tools/sample.mp4
@@ -53,3 +54,6 @@ e2e-dialogues: sample sample-script  ## видео + сценарий → script
 
 e2e-enrichment: sample sample-script  ## то же и дальше: scene.enriched (план, описание) → ready_for_review
 	$(PY) tools/dev_dialogues.py --enrichment tools/sample.mp4 tools/sample_script.docx
+
+e2e-editing: sample  ## правки листа через Kong: row_version, split/merge, перезапуск без потери правок
+	$(PY) tools/e2e_editing.py tools/sample.mp4

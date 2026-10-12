@@ -3,19 +3,18 @@ using Npgsql;
 namespace Cutsheet.ProjectApi;
 
 public sealed record Project(Guid Id, Guid OwnerId, string Name, string Stage, string Status, string? Error,
-    string? VideoUri, string? ScriptUri, double? Fps, long? DurationMs, string Language, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+    string? VideoUri, string? ScriptUri, double? Fps, long? DurationMs, string Language, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
+    bool ReviewRequired, bool StructureEdited);
 
 public sealed record Upload(Guid Id, Guid ProjectId, string Kind, string S3Key, string Status, string? Filename,
     string? ContentType, long? SizeBytes, long? PartSize, int? PartCount, string? S3UploadId);
 
-public sealed record SceneRow(Guid Id, int Index, long StartMs, long EndMs, string? ShotType, string? Description,
-    string Status, int RowVersion, List<string> KeyframeUris);
-
-/// <summary>Таблицы projects, uploads (пишет Project API) и чтение сцен (пишет Aggregator).</summary>
+/// <summary>Таблицы projects и uploads (пишет Project API).</summary>
 public sealed class ProjectStore(NpgsqlDataSource db)
 {
     private const string ProjectColumns =
-        "id, owner_id, name, stage, status, error, video_uri, script_uri, fps, duration_ms, language, created_at, updated_at";
+        "id, owner_id, name, stage, status, error, video_uri, script_uri, fps, duration_ms, language, created_at, updated_at, " +
+        "review_required, structure_edited";
 
     public async Task<Project> Create(Guid ownerId, string name, string language, CancellationToken ct)
     {
@@ -109,22 +108,30 @@ public sealed class ProjectStore(NpgsqlDataSource db)
         await tx.CommitAsync(ct);
     }
 
-    public async Task<List<SceneRow>> Scenes(Guid projectId, CancellationToken ct)
+    /// <summary>Режим «без правок» (FR-C12).</summary>
+    public async Task SetReviewRequired(Guid id, bool value, CancellationToken ct)
+    {
+        await using var cmd = db.CreateCommand("UPDATE projects SET review_required = $2, updated_at = now() WHERE id = $1");
+        cmd.Parameters.AddWithValue(id);
+        cmd.Parameters.AddWithValue(value);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>Последняя завершённая загрузка видео или сценария: из неё повторяется событие при перезапуске.</summary>
+    public async Task<Upload?> LastCompletedUpload(Guid projectId, string kind, CancellationToken ct)
     {
         await using var cmd = db.CreateCommand("""
-            SELECT s.id, s.idx, s.start_ms, s.end_ms, s.shot_type, s.description, s.status, s.row_version,
-                   COALESCE(array_agg(k.s3_uri ORDER BY k.position) FILTER (WHERE k.s3_uri IS NOT NULL), '{}')
-            FROM scenes s LEFT JOIN scene_keyframes k ON k.scene_id = s.id
-            WHERE s.project_id = $1
-            GROUP BY s.id ORDER BY s.idx
+            SELECT id, project_id, kind, s3_key, status, filename, content_type, size_bytes, part_size, part_count,
+                   s3_upload_id
+            FROM uploads WHERE project_id = $1 AND kind = $2 AND status = 'completed'
+            ORDER BY completed_at DESC LIMIT 1
             """);
         cmd.Parameters.AddWithValue(projectId);
+        cmd.Parameters.AddWithValue(kind);
         await using var r = await cmd.ExecuteReaderAsync(ct);
-        var list = new List<SceneRow>();
-        while (await r.ReadAsync(ct))
-            list.Add(new SceneRow(r.GetGuid(0), r.GetInt32(1), r.GetInt64(2), r.GetInt64(3), N<string>(r, 4),
-                N<string>(r, 5), r.GetString(6), r.GetInt32(7), [.. r.GetFieldValue<string[]>(8)]));
-        return list;
+        if (!await r.ReadAsync(ct)) return null;
+        return new Upload(r.GetGuid(0), r.GetGuid(1), r.GetString(2), r.GetString(3), r.GetString(4),
+            N<string>(r, 5), N<string>(r, 6), N<long>(r, 7), N<long>(r, 8), N<int>(r, 9), N<string>(r, 10));
     }
 
     private static async Task<List<Project>> ReadProjects(NpgsqlCommand cmd, CancellationToken ct)
@@ -134,7 +141,7 @@ public sealed class ProjectStore(NpgsqlDataSource db)
         while (await r.ReadAsync(ct))
             list.Add(new Project(r.GetGuid(0), r.GetGuid(1), r.GetString(2), r.GetString(3), r.GetString(4),
                 N<string>(r, 5), N<string>(r, 6), N<string>(r, 7), N<double>(r, 8), N<long>(r, 9), r.GetString(10),
-                r.GetFieldValue<DateTimeOffset>(11), r.GetFieldValue<DateTimeOffset>(12)));
+                r.GetFieldValue<DateTimeOffset>(11), r.GetFieldValue<DateTimeOffset>(12), r.GetBoolean(13), r.GetBoolean(14)));
         return list;
     }
 

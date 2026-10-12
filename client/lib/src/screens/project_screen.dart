@@ -3,14 +3,20 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import 'package:media_kit_video/media_kit_video.dart';
+
 import '../api.dart';
 import '../hub.dart';
 import '../models.dart';
+import '../scene_player.dart';
+import '../sheet_controller.dart';
 import '../timecode.dart';
 import '../uploader.dart';
+import 'sheet_view.dart';
 import 'status_chip.dart';
 
-/// Карточка проекта: загрузка видео, статус пайплайна в реальном времени, найденные планы.
+/// Карточка проекта: загрузка видео, статус пайплайна в реальном времени и редактор монтажного
+/// листа со встроенным плеером (этап 4).
 class ProjectScreen extends StatefulWidget {
   const ProjectScreen({super.key, required this.api, required this.project});
   final Api api;
@@ -23,7 +29,9 @@ class ProjectScreen extends StatefulWidget {
 class _ProjectScreenState extends State<ProjectScreen> {
   late Project _project = widget.project;
   late final ProjectHub _hub = ProjectHub(widget.api, _project.id, _onStatus);
-  SceneSheet? _sheet;
+  late final SheetController _sheet = SheetController(widget.api, _project.id, onNotice: _notice);
+  ScenePlayer? _player;
+  String? _selectedId;
   Uploader? _uploader;
   double? _progress;
   String? _uploadError;
@@ -42,28 +50,59 @@ class _ProjectScreenState extends State<ProjectScreen> {
   void dispose() {
     _hub.close();
     _uploader?.dispose();
+    _sheet.dispose();
+    _player?.dispose();
     super.dispose();
   }
 
   Future<void> _refresh() async {
     try {
       final project = await widget.api.project(_project.id);
-      final sheet = await widget.api.scenes(_project.id);
-      if (mounted) {
-        setState(() {
-          _project = project;
-          _sheet = sheet;
-        });
-      }
+      if (mounted) setState(() => _project = project);
     } on ApiException catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      _notice(e.message);
+    }
+    await _sheet.load();
+    final url = _sheet.sheet?.videoUrl;
+    if (url != null && mounted) {
+      setState(() => _player ??= ScenePlayer());
+      await _player!.open(url);
     }
   }
 
+  void _notice(String message) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// Результаты этапов приходят из Aggregator: лист перечитывается, правки на сервере не теряются.
   void _onStatus(StatusUpdate s) {
     if (!mounted) return;
     setState(() => _project = _project.withStatus(s));
-    if (s.stage == 'scenes' && s.status == 'done') _refresh();
+    if (s.status == 'done' || s.status == 'ready_for_review') _refresh();
+  }
+
+  void _select(Scene s) {
+    setState(() => _selectedId = s.id);
+    _player?.seek(s.startMs);
+  }
+
+  void _play(Scene s) {
+    setState(() => _selectedId = s.id);
+    _player?.playRange(s.startMs, s.endMs);
+  }
+
+  Future<void> _setReviewRequired(bool value) async {
+    if (await _sheet.setReviewRequired(value)) await _refresh();
+  }
+
+  Future<void> _reprocess(String from) async {
+    try {
+      final project = await widget.api.reprocess(_project.id, from);
+      if (mounted) setState(() => _project = project);
+      _notice('Обработка перезапущена, ваши правки сохранятся');
+    } on ApiException catch (e) {
+      _notice(e.message);
+    }
   }
 
   Future<void> _pickVideo() async {
@@ -96,16 +135,42 @@ class _ProjectScreenState extends State<ProjectScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final scenes = _sheet?.scenes ?? const <Scene>[];
     return Scaffold(
       appBar: AppBar(
         title: Text(_project.name),
         actions: [
+          ListenableBuilder(
+            listenable: _sheet,
+            builder: (_, _) => Row(children: [
+              if (_sheet.saving)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8),
+                  child: Text('Сохранение…'),
+                ),
+              if (_sheet.sheet != null)
+                Tooltip(
+                  message: 'Режим «без правок»: лист берётся как есть, ревью необязательно (FR-C12)',
+                  child: Row(children: [
+                    const Text('Без правок'),
+                    Switch(value: _sheet.readOnly, onChanged: (v) => _setReviewRequired(!v)),
+                  ]),
+                ),
+            ]),
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: StatusChip(stage: _project.stage, status: _project.status),
           ),
           IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh), tooltip: 'Обновить'),
+          PopupMenuButton<String>(
+            tooltip: 'Перезапустить обработку',
+            icon: const Icon(Icons.replay),
+            onSelected: _reprocess,
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'scenes', child: Text('Перезапустить с поиска склеек')),
+              PopupMenuItem(value: 'dialogue', child: Text('Перезапустить с разбора сценария')),
+            ],
+          ),
         ],
       ),
       body: Column(
@@ -114,12 +179,36 @@ class _ProjectScreenState extends State<ProjectScreen> {
           if (_hubError != null) _Banner(text: _hubError!, color: Theme.of(context).colorScheme.errorContainer),
           if (_project.status == 'failed' && _project.error != null)
             _Banner(text: _project.error!, color: Theme.of(context).colorScheme.errorContainer),
-          _uploadPanel(context),
+          ListenableBuilder(
+            listenable: _sheet,
+            builder: (context, _) => _sheet.readOnly
+                ? _Banner(
+                    text: 'Режим «без правок»: лист используется как есть, экспорт доступен сразу после обработки. '
+                        'Чтобы править, выключите переключатель.',
+                    color: Theme.of(context).colorScheme.secondaryContainer)
+                : const SizedBox.shrink(),
+          ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (_player != null) _PlayerPanel(player: _player!, fps: _sheet.sheet?.fps),
+              Expanded(child: _uploadPanel(context)),
+            ],
+          ),
           const Divider(height: 1),
           Expanded(
-            child: scenes.isEmpty
-                ? Center(child: Text(_emptyText()))
-                : _SceneList(scenes: scenes, fps: _sheet?.fps),
+            child: ListenableBuilder(
+              listenable: _sheet,
+              builder: (context, _) => (_sheet.sheet?.scenes.isEmpty ?? true)
+                  ? Center(child: Text(_sheet.error ?? _emptyText()))
+                  : SheetTable(
+                      controller: _sheet,
+                      selectedId: _selectedId,
+                      onSelect: _select,
+                      onPlay: _player == null ? null : _play,
+                      playerPositionMs: _player == null ? null : () => _player!.positionMs,
+                    ),
+            ),
           ),
         ],
       ),
@@ -170,7 +259,7 @@ class _ProjectScreenState extends State<ProjectScreen> {
   }
 
   String _summary() {
-    final sheet = _sheet;
+    final sheet = _sheet.sheet;
     if (sheet == null || sheet.scenes.isEmpty) return '';
     final duration = sheet.durationMs == null ? '' : ', длительность ${timecode(sheet.durationMs!, sheet.fps)}';
     return 'Планов: ${sheet.scenes.length}$duration, ${sheet.fps?.toStringAsFixed(2) ?? '?'} кадр/с';
@@ -187,53 +276,31 @@ class _Banner extends StatelessWidget {
       Container(color: color, padding: const EdgeInsets.all(12), child: Text(text));
 }
 
-/// Найденные планы: №, начало, конец, длительность, ключевые кадры (FR-C4, без редактирования).
-class _SceneList extends StatelessWidget {
-  const _SceneList({required this.scenes, required this.fps});
-  final List<Scene> scenes;
+/// Встроенный плеер (FR-C7): клик по строке перематывает на начало сцены, ▶ в строке играет сцену.
+class _PlayerPanel extends StatelessWidget {
+  const _PlayerPanel({required this.player, required this.fps});
+  final ScenePlayer player;
   final double? fps;
 
   @override
   Widget build(BuildContext context) {
-    final mono = Theme.of(context).textTheme.bodyMedium?.copyWith(fontFeatures: const [FontFeature.tabularFigures()]);
-    return ListView.separated(
-      itemCount: scenes.length,
-      separatorBuilder: (_, _) => const Divider(height: 1),
-      itemBuilder: (_, i) {
-        final s = scenes[i];
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: [
-              SizedBox(width: 40, child: Text('${s.index + 1}', style: Theme.of(context).textTheme.titleMedium)),
-              SizedBox(
-                width: 240,
-                child: Text('${timecode(s.startMs, fps)} – ${timecode(s.endMs, fps)}\n${seconds(s.endMs - s.startMs)}',
-                    style: mono),
+    return SizedBox(
+      width: 480,
+      child: Column(
+        children: [
+          AspectRatio(aspectRatio: 16 / 9, child: Video(controller: player.video, controls: NoVideoControls)),
+          Row(children: [
+            IconButton(onPressed: player.toggle, icon: const Icon(Icons.play_arrow), tooltip: 'Играть / пауза'),
+            StreamBuilder<Duration>(
+              stream: player.position,
+              builder: (_, snap) => Text(
+                timecode(snap.data?.inMilliseconds ?? 0, fps),
+                style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()]),
               ),
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      for (final url in s.keyframeUrls)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: Image.network(url, height: 72, fit: BoxFit.cover,
-                                errorBuilder: (_, _, _) => const SizedBox(
-                                    width: 128, height: 72, child: Icon(Icons.broken_image_outlined))),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+            ),
+          ]),
+        ],
+      ),
     );
   }
 }

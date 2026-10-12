@@ -41,7 +41,7 @@ public sealed class EnrichmentCollector(NpgsqlDataSource db, IEventPublisher bus
             SELECT @s, src, @r FROM unnest(ARRAY['shot_type', 'description']) AS src
             ON CONFLICT (scene_id, source) DO UPDATE SET status = 'pending', request_event_id = excluded.request_event_id,
                 requested_at = now(), finished_at = NULL, error = NULL;
-            UPDATE scenes SET status = 'enriching' WHERE id = @s;
+            UPDATE scenes SET status = 'enriching', needs_enrichment = false WHERE id = @s;
             """, ct, ("s", sceneId), ("r", requestEventId));
     }
 
@@ -183,8 +183,12 @@ public sealed class EnrichmentCollector(NpgsqlDataSource db, IEventPublisher bus
         return true;
     }
 
+    /// <summary>Порядок блокировок как в join и SceneSync: сначала строка projects, затем pipeline_state.</summary>
     private static Task LockProjectAsync(NpgsqlConnection conn, Guid p, CancellationToken ct) =>
-        ExecAsync(conn, "SELECT 1 FROM pipeline_state WHERE project_id = @p FOR UPDATE", ct, ("p", p));
+        ExecAsync(conn, """
+            SELECT 1 FROM projects WHERE id = @p FOR UPDATE;
+            SELECT 1 FROM pipeline_state WHERE project_id = @p FOR UPDATE;
+            """, ct, ("p", p));
 
     /// <summary>
     /// Пересчитывает статусы сцен по состоянию обогащения и, если какая-то сцена дошла до
