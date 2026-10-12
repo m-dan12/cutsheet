@@ -129,3 +129,20 @@ def test_rate_limit_spaces_requests():
     for _ in range(3):
         c.chat([], prompt_version="t")
     assert clock.slept == [2.0, 2.0]
+
+
+def test_metrics_count_calls_tokens_and_cost():
+    from prometheus_client import REGISTRY
+
+    def value(name, **labels):
+        return REGISTRY.get_sample_value(name, labels) or 0.0
+
+    srv = FakeLLMServer(['{"n": 1}'])
+    client = srv.client(price_prompt_per_1k=1.0)
+    model = client.config.model
+    before = (value("cutsheet_llm_requests_total", model=model, prompt="m-1", outcome="ok"),
+              value("cutsheet_llm_tokens_total", model=model, kind="prompt"))
+    client.complete_json([{"role": "user", "content": "x"}], SCHEMA, prompt_version="m-1")
+    assert value("cutsheet_llm_requests_total", model=model, prompt="m-1", outcome="ok") == before[0] + 1
+    assert value("cutsheet_llm_tokens_total", model=model, kind="prompt") == before[1] + 10
+    assert value("cutsheet_llm_cost_total", model=model) >= 0.01

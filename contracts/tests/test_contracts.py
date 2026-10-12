@@ -11,14 +11,23 @@ ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = sorted((ROOT / "examples").glob("*.json"))
 
 
-def topics() -> set[str]:
+def registry() -> set[str]:
     lines = (ROOT / "topics.txt").read_text(encoding="utf-8").splitlines()
     return {ln.split()[0] for ln in lines if ln.strip() and not ln.startswith("#")}
+
+
+def topics() -> set[str]:
+    """Топики событий; у DLQ своей схемы нет — в них лежат исходные сообщения как есть."""
+    return {t for t in registry() if not t.endswith(".dlq")}
 
 
 @pytest.fixture(scope="module")
 def contracts():
     return Contracts(ROOT / "schemas")
+
+
+def test_every_topic_has_dlq():
+    assert {t for t in registry() if t.endswith(".dlq")} == {f"{t}.dlq" for t in topics()}
 
 
 def test_every_topic_has_schema_and_example(contracts):

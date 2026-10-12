@@ -52,6 +52,22 @@ public sealed class PipelineConsumer(EventBus bus, NpgsqlDataSource db, Dialogue
         }
     }
 
+    /// <summary>
+    /// Событие ушло в DLQ после всех попыток: проект не должен навсегда зависнуть в «обработке»,
+    /// поэтому публикуем pipeline.failed. Для самого pipeline.failed — нет, иначе цикл.
+    /// </summary>
+    protected override Task OnFailedAsync(Envelope e, Exception error, bool retryable, CancellationToken ct) =>
+        e.EventType == "pipeline.failed"
+            ? Task.CompletedTask
+            : Bus.PublishAsync("pipeline.failed", e.ProjectId, e.CorrelationId, new
+            {
+                service = Consumer,
+                source_event_id = e.EventId,
+                source_event_type = e.EventType,
+                error = $"{error.GetType().Name}: {error.Message}",
+                retryable,
+            }, ct);
+
     /// <summary>Сохраняет сцены одной транзакцией. null — событие уже обработано.</summary>
     private async Task<int?> SaveScenes(Envelope e, CancellationToken ct)
     {

@@ -9,4 +9,7 @@
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.23.0" />
     <PackageReference Include="Npgsql" Version="10.0.3" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../libs/dotnet/Cutsheet.Messaging/Cutsheet.Messaging.csproj" />
+  </ItemGroup>
 </Project>

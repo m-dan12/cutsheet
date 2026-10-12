@@ -72,18 +72,23 @@ jobs:
     env:
       SP_MODE: rules   # в CI нет LLM: Script Parser размечает эвристиками
       SDS_MODE: stub   # и Scene Description пишет описание-заглушку
+      # Этап 6: трейсы в Jaeger из профиля observability, короткие паузы между повторами.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      KAFKA_RETRY_BACKOFF_S: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: make dev-install
-      - run: docker compose -f deploy/docker-compose.yml up -d --build --wait
+      - run: docker compose -f deploy/docker-compose.yml --profile observability up -d --build --wait
       # У C#-сервисов нет healthcheck (в образе aspnet нет curl): ждём, пока Project API ответит через Kong.
       - run: curl -fsS --retry 30 --retry-all-errors --retry-delay 2 http://localhost:8000/api/v1/health
       - run: make e2e
       - run: make e2e-enrichment
       - run: make e2e-editing
       - run: make e2e-export
+      - run: make e2e-ops OBS=1
+      - run: make load-test N=3
       - if: failure()
-        run: docker compose -f deploy/docker-compose.yml logs --tail=200
+        run: docker compose -f deploy/docker-compose.yml --profile observability logs --tail=200

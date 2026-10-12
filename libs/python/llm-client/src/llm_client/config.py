@@ -21,6 +21,9 @@ class LLMConfig:
     rate_limit_rpm: float = 0.0                   # запросов в минуту из процесса; 0 — без лимита (внешний API)
     breaker_failures: int = 5                     # подряд неудачных вызовов до размыкания (circuit breaker)
     breaker_cooldown_s: float = 60.0              # сколько цепь разомкнута до пробного вызова
+    # Цена за 1000 токенов (внешний API) для метрики стоимости; у локальной модели 0.
+    price_prompt_per_1k: float = 0.0
+    price_completion_per_1k: float = 0.0
 
     @classmethod
     def from_env(cls, prefix: str = "LLM_") -> "LLMConfig":
@@ -38,4 +41,6 @@ class LLMConfig:
             rate_limit_rpm=float(e("RATE_LIMIT_RPM", str(cls.rate_limit_rpm))),
             breaker_failures=int(e("BREAKER_FAILURES", str(cls.breaker_failures))),
             breaker_cooldown_s=float(e("BREAKER_COOLDOWN_S", str(cls.breaker_cooldown_s))),
+            price_prompt_per_1k=float(e("PRICE_PROMPT_PER_1K", str(cls.price_prompt_per_1k))),
+            price_completion_per_1k=float(e("PRICE_COMPLETION_PER_1K", str(cls.price_completion_per_1k))),
         )

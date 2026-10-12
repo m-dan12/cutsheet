@@ -2,10 +2,12 @@
 // публичный ключ в JWKS и в файле для Kong.
 using System.Net.Mail;
 using Cutsheet.Auth;
+using Cutsheet.Messaging;
 using Microsoft.AspNetCore.Identity;
 using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddCutsheetObservability("auth");
 builder.Services.AddSingleton(NpgsqlDataSource.Create(builder.Configuration.GetConnectionString("Postgres")
     ?? "Host=localhost;Database=cutsheet;Username=cutsheet;Password=cutsheet"));
 builder.Services.AddSingleton<SigningKey>();
@@ -15,6 +17,7 @@ builder.Services.AddSingleton<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.ConfigureHttpJsonOptions(o =>
     o.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.SnakeCaseLower);
 var app = builder.Build();
+app.UseCutsheetObservability();
 
 // Ключ создаётся при старте, а не при первом запросе: Kong ждёт публичный ключ в томе.
 app.Services.GetRequiredService<SigningKey>();
