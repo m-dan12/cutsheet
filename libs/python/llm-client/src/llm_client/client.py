@@ -7,6 +7,8 @@
 - Rate limit (внешний API) и circuit breaker: после серии неудачных вызовов цепь
   размыкается, и вызовы сразу получают LLMCircuitOpen, пока не пройдёт пауза (FR-SDS4).
 - В лог попадают модель, версия промпта, длительность и токены, но не содержимое (FR-LLM4).
+- Метрики Prometheus (этап 6): вызовы по исходу, длительность, токены и стоимость. Их отдаёт
+  HTTP-сервер /metrics адаптера Kafka (cutsheet_common.observability) того же процесса.
 """
 
 from __future__ import annotations
@@ -22,12 +24,19 @@ from typing import Any, Callable
 
 import httpx
 from jsonschema import Draft202012Validator
+from prometheus_client import Counter, Histogram
 
 from .config import LLMConfig
 
 log = logging.getLogger("cutsheet.llm")
 
 Message = dict[str, Any]
+
+LLM_REQUESTS = Counter("cutsheet_llm_requests_total", "Вызовы LLM по исходу", ["model", "prompt", "outcome"])
+LLM_TOKENS = Counter("cutsheet_llm_tokens_total", "Токены LLM", ["model", "kind"])
+LLM_COST = Counter("cutsheet_llm_cost_total", "Стоимость вызовов LLM по ценам LLM_PRICE_*_PER_1K", ["model"])
+LLM_DURATION = Histogram("cutsheet_llm_request_duration_seconds", "Длительность HTTP-вызова LLM", ["model"],
+                         buckets=(0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600))
 
 
 class LLMError(RuntimeError):
@@ -137,7 +146,11 @@ class LLMClient:
         if response_format:
             body["response_format"] = response_format
         cfg = self.config
-        self._check_circuit(prompt_version)
+        try:
+            self._check_circuit(prompt_version)
+        except LLMCircuitOpen:
+            LLM_REQUESTS.labels(cfg.model, prompt_version, "circuit_open").inc()
+            raise
         last: Exception | None = None
         for attempt in range(cfg.max_retries + 1):
             if attempt:
@@ -153,6 +166,7 @@ class LLMClient:
                             cfg.model, prompt_version, attempt + 1, type(e).__name__)
                 continue
             duration_ms = round((time.monotonic() - started) * 1000)
+            LLM_DURATION.labels(cfg.model).observe(duration_ms / 1000)
             if resp.status_code == 429 or resp.status_code >= 500:
                 last = LLMError(f"HTTP {resp.status_code}")
                 log.warning("llm http %d model=%s prompt=%s attempt=%d",
@@ -160,6 +174,7 @@ class LLMClient:
                 continue
             if resp.status_code >= 400:
                 # Ошибка запроса, а не недоступность модели: цепь не размыкаем.
+                LLM_REQUESTS.labels(cfg.model, prompt_version, "error").inc()
                 raise LLMError(f"HTTP {resp.status_code}: {resp.text[:500]}")
             data = resp.json()
             usage = {k: v for k, v in (data.get("usage") or {}).items() if isinstance(v, int)}
@@ -168,9 +183,21 @@ class LLMClient:
                      usage.get("completion_tokens"))
             text = data["choices"][0]["message"].get("content") or ""
             self._record(ok=True)
+            self._count(prompt_version, usage)
             return ChatResult(text=text, duration_ms=duration_ms, usage=usage)
         self._record(ok=False)
+        LLM_REQUESTS.labels(cfg.model, prompt_version, "error").inc()
         raise LLMError(f"LLM unavailable after {cfg.max_retries + 1} attempts: {last}")
+
+    def _count(self, prompt_version: str, usage: dict[str, int]) -> None:
+        cfg = self.config
+        LLM_REQUESTS.labels(cfg.model, prompt_version, "ok").inc()
+        prompt, completion = usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+        LLM_TOKENS.labels(cfg.model, "prompt").inc(prompt)
+        LLM_TOKENS.labels(cfg.model, "completion").inc(completion)
+        cost = (prompt * cfg.price_prompt_per_1k + completion * cfg.price_completion_per_1k) / 1000
+        if cost:
+            LLM_COST.labels(cfg.model).inc(cost)
 
     # ---------- структурированный вывод ----------
 

@@ -12,7 +12,10 @@ LLM, Transcription & Alignment распознаёт речь и сопостав
 Shot Type определяет крупность плана (MediaPipe), Scene Description описывает план
 мультимодальной LLM, Aggregator собирает оба результата и переводит проект в `ready_for_review`, **этап 4** (редактирование):
 лист правится в клиенте со встроенным плеером, правки защищены `row_version` и переживают
-повторную обработку, и **этап 5** (экспорт): лист с правками выгружается в Excel, Word и PDF.
+повторную обработку, **этап 5** (экспорт): лист с правками выгружается в Excel, Word и PDF,
+и **этап 6** (эксплуатация): повторы и DLQ во всех потребителях, метрики Prometheus и дашборд
+Grafana, трейсы в Jaeger, JSON-логи, нагрузочный тест и резервное копирование — см.
+[docs/operations.md](docs/operations.md).
 
 ## Правки листа (этап 4)
 
@@ -55,6 +58,8 @@ Export Service (в БД не ходит) кладёт файл рядом (`shee
 |---|---|
 | `contracts/` | JSON Schema событий Kafka, реестр топиков, примеры, контрактные тесты |
 | `deploy/` | `docker-compose.yml` (Kafka KRaft, PostgreSQL, MinIO, Kong, сервисы), `kong/kong.yml` |
+| `deploy/observability/` | Prometheus (опрос и оповещения), Grafana (дашборд), профиль compose `observability` |
+| `docs/operations.md` | эксплуатация: DLQ, метрики, трейсы, логи, нагрузочный тест, бэкап, подбор порогов |
 | `db/migrations/` | SQL-миграции PostgreSQL (схема из ТЗ 6.1) |
 | `libs/python/cutsheet-common` | общий код Python-сервисов: конверт, проверка контрактов, адаптер Kafka, S3, логи |
 | `libs/python/llm-client` | общий слой LLM: OpenAI-совместимый API (Ollama / vLLM / внешний), JSON по схеме с повтором |
@@ -84,6 +89,9 @@ make e2e-kafka                       # то же без API: прямо в Kafka
 make e2e-dialogues                   # видео + сценарий → script.parsed → dialogue.aligned → scene.ready-for-enrichment
 make e2e-enrichment                  # то же до конца: план и описание каждой сцены → ready_for_review
 make test                            # контрактные и unit-тесты
+make up-obs                          # то же окружение + Prometheus, Grafana, Jaeger (этап 6)
+make e2e-ops OBS=1                   # DLQ, повторы, метрики и трейсы
+make load-test N=5                   # 5 проектов параллельно до ready_for_review
 ```
 
 **LLM для Script Parser.** По умолчанию сервис ходит в Ollama на хосте
@@ -114,6 +122,9 @@ make test                            # контрактные и unit-тесты
 | http://localhost:9001 | консоль MinIO (`cutsheet` / `cutsheet-secret`) |
 | `localhost:9094` | Kafka для хоста; внутри сети compose — `kafka:9092` |
 | `localhost:5432` | PostgreSQL (`cutsheet` / `cutsheet`) |
+| http://localhost:3000 | Grafana, дашборд «CutSheet — конвейер» (`make up-obs`) |
+| http://localhost:9090 | Prometheus (`make up-obs`) |
+| http://localhost:16686 | Jaeger, трейсы (`make up-obs`) |
 
 Миграции БД применяются только к пустому тому PostgreSQL. После обновления с этапа 0:
 `docker compose -f deploy/docker-compose.yml down -v`, затем `make up`.

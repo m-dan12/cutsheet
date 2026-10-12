@@ -1,13 +1,17 @@
 COMPOSE = docker compose -f deploy/docker-compose.yml
 PY ?= python3
 
-.PHONY: up down logs ps dev-install test test-contracts test-python test-dotnet sample sample-script e2e e2e-kafka e2e-dialogues e2e-enrichment e2e-editing e2e-export
+.PHONY: up up-obs down logs ps dev-install test test-contracts test-python test-dotnet sample sample-script e2e e2e-kafka e2e-dialogues e2e-enrichment e2e-editing e2e-ops dlq-list load-test db-backup e2e-export
 
 up:            ## поднять всё окружение
 	$(COMPOSE) up -d --build
 
+up-obs:        ## то же + Prometheus :9090, Grafana :3000, Jaeger :16686, kafka-exporter (этап 6)
+	OTEL_EXPORTER_OTLP_ENDPOINT=$${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318} \
+		$(COMPOSE) --profile observability up -d --build
+
 down:          ## остановить (данные в томах сохраняются; down -v — удалить)
-	$(COMPOSE) down
+	$(COMPOSE) --profile observability --profile llm down
 
 logs:
 	$(COMPOSE) logs -f --tail=100
@@ -62,3 +66,16 @@ e2e-editing: sample  ## правки листа через Kong: row_version, sp
 
 e2e-export: sample  ## экспорт через Kong: xlsx / docx / pdf с правками пользователя, шаблоны, export.failed
 	$(PY) tools/e2e_export.py tools/sample.mp4
+
+e2e-ops:       ## DLQ, повторы, pipeline.failed; с make up-obs ещё метрики и трейсы (этап 6)
+	$(PY) tools/e2e_ops.py $(if $(OBS),--observability)
+
+dlq-list:      ## что лежит в DLQ; повтор: python tools/dlq.py replay <topic>
+	$(PY) tools/dlq.py list
+
+N ?= 5
+load-test: sample sample-script  ## N проектов параллельно до ready_for_review (ТЗ 11.1)
+	$(PY) tools/load_test.py -n $(N) tools/sample.mp4 tools/sample_script.docx
+
+db-backup:     ## pg_dump в backups/ и проверка восстановления во временную базу (ТЗ 8)
+	sh tools/pg_backup.sh backups

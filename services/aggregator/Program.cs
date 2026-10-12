@@ -8,6 +8,7 @@ using Cutsheet.Aggregator.Enrichment;
 using Cutsheet.Messaging;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddCutsheetObservability("aggregator");
 builder.Services.AddSingleton<EventBus>();
 builder.Services.AddSingleton(Postgres.CreateDataSource(builder.Configuration));
 builder.Services.AddSingleton<IEventPublisher>(sp => sp.GetRequiredService<EventBus>());
@@ -16,6 +17,7 @@ builder.Services.AddSingleton<EnrichmentCollector>();
 builder.Services.AddHostedService<PipelineConsumer>();
 builder.Services.AddHostedService<EnrichmentTimeouts>();
 var app = builder.Build();
+app.UseCutsheetObservability();
 
 app.MapGet("/health", () => Results.Ok(new { service = "aggregator", status = "ok" }));
 app.Run();

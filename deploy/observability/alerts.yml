@@ -1,0 +1,38 @@
+# Правила оповещений (этап 6). Видны в Prometheus → Alerts и на дашборде Grafana.
+groups:
+  - name: cutsheet
+    rules:
+      - alert: CutsheetServiceDown
+        expr: up{job=~"cutsheet-.*"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.instance }} не отвечает на /metrics"
+
+      - alert: CutsheetDeadLetters
+        expr: sum by (service, topic, reason) (increase(cutsheet_dlq_messages_total[15m])) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.service }}: сообщения из {{ $labels.topic }} ушли в DLQ ({{ $labels.reason }})"
+          description: "Разбор: python tools/dlq.py list {{ $labels.topic }}; после исправления — replay."
+
+      - alert: CutsheetHandlerRetries
+        expr: sum by (service, topic) (increase(cutsheet_handler_retries_total[15m])) > 5
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.service }} часто повторяет обработку {{ $labels.topic }}"
+
+      # Детекция и транскрибация идут десятки минут, поэтому небольшой lag — норма; тревога —
+      # когда очередь растёт долго.
+      - alert: CutsheetConsumerLag
+        expr: sum by (consumergroup, topic) (kafka_consumergroup_lag) > 20
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Группа {{ $labels.consumergroup }} отстаёт по {{ $labels.topic }} на {{ $value }} сообщений"
+
+      - alert: CutsheetLLMErrors
+        expr: sum by (model, outcome) (increase(cutsheet_llm_requests_total{outcome!="ok"}[10m])) > 3
+        labels: { severity: warning }
+        annotations:
+          summary: "LLM {{ $labels.model }}: {{ $value }} неудачных вызовов ({{ $labels.outcome }}) за 10 минут"

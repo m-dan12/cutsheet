@@ -10,6 +10,7 @@ using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 var config = builder.Configuration;
+builder.AddCutsheetObservability("project-api");
 
 builder.Services.AddSingleton<EventBus>();
 builder.Services.AddSingleton(Postgres.CreateDataSource(config));
@@ -53,6 +54,7 @@ builder.Services.ConfigureHttpJsonOptions(o =>
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
+app.UseCutsheetObservability();
 app.UseAuthentication();
 app.UseAuthorization();
 

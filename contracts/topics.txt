@@ -1,6 +1,5 @@
 # Реестр топиков Kafka (этап 0). Формат: <топик> <партиции> <retention.ms>
 # Топик = event_type. 7 суток = 604800000 мс (ТЗ, раздел 8).
-# DLQ-топики (<topic>.dlq, 30 суток) добавляются на этапе 6.
 video.uploaded              3 604800000
 script.uploaded             3 604800000
 scenes.detected             3 604800000
@@ -13,3 +12,18 @@ export.completed            3 604800000
 export.failed               3 604800000
 project.status-changed      3 604800000
 pipeline.failed             3 604800000
+
+# DLQ (этап 6, ТЗ 4.3 и 8): сообщения, не обработанные после всех повторов, и невалидные.
+# Исходное сообщение как есть + заголовки x-dlq-*; 30 суток = 2592000000 мс; tools/dlq.py.
+video.uploaded.dlq              1 2592000000
+script.uploaded.dlq             1 2592000000
+scenes.detected.dlq             1 2592000000
+script.parsed.dlq               1 2592000000
+dialogue.aligned.dlq            1 2592000000
+scene.ready-for-enrichment.dlq  1 2592000000
+scene.enriched.dlq              1 2592000000
+export.requested.dlq            1 2592000000
+export.completed.dlq            1 2592000000
+export.failed.dlq               1 2592000000
+project.status-changed.dlq      1 2592000000
+pipeline.failed.dlq             1 2592000000
