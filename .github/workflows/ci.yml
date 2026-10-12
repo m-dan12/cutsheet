@@ -30,7 +30,7 @@ jobs:
       - run: dotnet build services/${{ matrix.service }} -c Release -warnaserror
 
   dotnet-test:
-    name: Aggregator tests (PostgreSQL)
+    name: C# tests (PostgreSQL)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -47,6 +47,7 @@ jobs:
         with: { dotnet-version: "10.0.x" }
       - run: for f in db/migrations/*.sql; do psql -v ON_ERROR_STOP=1 -h localhost -U cutsheet -d cutsheet -f "$f"; done
       - run: dotnet test services/aggregator-tests
+      - run: dotnet test services/project-api-tests
 
   client:
     name: Flutter client
@@ -78,5 +79,6 @@ jobs:
       - run: curl -fsS --retry 30 --retry-all-errors --retry-delay 2 http://localhost:8000/api/v1/health
       - run: make e2e
       - run: make e2e-dialogues
+      - run: make e2e-editing
       - if: failure()
         run: docker compose -f deploy/docker-compose.yml logs --tail=200

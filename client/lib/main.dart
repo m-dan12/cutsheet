@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:media_kit/media_kit.dart';
 
 import 'src/api.dart';
 import 'src/screens/login_screen.dart';
 import 'src/screens/projects_screen.dart';
 
-void main() => runApp(CutsheetApp(api: Api()));
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized(); // встроенный плеер (libmpv)
+  runApp(CutsheetApp(api: Api()));
+}
 
 class CutsheetApp extends StatefulWidget {
   const CutsheetApp({super.key, required this.api});
