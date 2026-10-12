@@ -52,7 +52,8 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: make dev-install
       - run: docker compose -f deploy/docker-compose.yml up -d --build --wait
-      - run: curl -fsS http://localhost:8000/api/v1/health
+      # У C#-сервисов нет healthcheck (в образе aspnet нет curl): ждём, пока Project API ответит через Kong.
+      - run: curl -fsS --retry 30 --retry-all-errors --retry-delay 2 http://localhost:8000/api/v1/health
       - run: make e2e
       - if: failure()
         run: docker compose -f deploy/docker-compose.yml logs --tail=200
