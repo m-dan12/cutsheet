@@ -1,14 +1,44 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../models.dart';
 import '../sheet_controller.dart';
 import '../timecode.dart';
+import '../ui/widgets.dart';
+import 'sheet_dialogs.dart';
+
+/// Фильтр строк над таблицей: все, требующие проверки, изменённые человеком.
+enum SheetFilter { all, review, edited }
+
+/// Строку стоит проверить (FR-C8): автоматика не уверена, реплика не найдена в сценарии
+/// или границы менял человек и план с описанием могли устареть.
+bool needsReview(Scene s) =>
+    s.lowConfidence('shot_type') ||
+    s.lowConfidence('description') ||
+    s.needsEnrichment ||
+    s.replicas.any((r) => r.origin == 'auto' && !r.matched);
+
+/// Строку правил человек (FR-C9).
+bool editedByUser(Scene s) => s.edited.isNotEmpty || s.origin == 'user' || s.replicas.any((r) => r.edited.isNotEmpty);
+
+bool matchesFilter(Scene s, SheetFilter f, String query) {
+  final ok = switch (f) {
+    SheetFilter.all => true,
+    SheetFilter.review => needsReview(s),
+    SheetFilter.edited => editedByUser(s),
+  };
+  if (!ok || query.isEmpty) return ok;
+  final q = query.toLowerCase();
+  return (s.description ?? '').toLowerCase().contains(q) ||
+      s.replicas.any((r) => r.line.toLowerCase().contains(q)) ||
+      '${s.index + 1}' == q;
+}
 
 /// Таблица монтажного листа (FR-C4): №, начало, конец, план, описание, диалоги. Ячейки
-/// редактируются на месте и сохраняются сами (FR-C5, FR-C11); правки человека помечены, к
-/// авто-значению можно вернуться (FR-C9); сомнительные авто-результаты подсвечены (FR-C8).
+/// редактируются на месте и сохраняются сами (FR-C5, FR-C11); правки человека помечены синим,
+/// к авто-значению можно вернуться (FR-C9); сомнительные авто-результаты подсвечены янтарным (FR-C8).
 class SheetTable extends StatelessWidget {
   const SheetTable({
     super.key,
@@ -17,6 +47,8 @@ class SheetTable extends StatelessWidget {
     this.onSelect,
     this.onPlay,
     this.playerPositionMs,
+    this.filter = SheetFilter.all,
+    this.query = '',
   });
 
   final SheetController controller;
@@ -24,8 +56,10 @@ class SheetTable extends StatelessWidget {
   final void Function(Scene scene)? onSelect;
   final void Function(Scene scene)? onPlay;
 
-  /// Позиция плеера для «Разрезать по позиции плеера»; null — плеера нет.
+  /// Позиция плеера для «Разделить по позиции плеера»; null — плеера нет.
   final int Function()? playerPositionMs;
+  final SheetFilter filter;
+  final String query;
 
   @override
   Widget build(BuildContext context) {
@@ -34,29 +68,32 @@ class SheetTable extends StatelessWidget {
       builder: (context, _) {
         final sheet = controller.sheet;
         if (sheet == null) return const SizedBox.shrink();
+        final rows = sheet.scenes.where((s) => matchesFilter(s, filter, query)).toList();
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const _Header(),
-            const Divider(height: 1),
             Expanded(
-              child: ListView.separated(
-                itemCount: sheet.scenes.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
-                itemBuilder: (_, i) {
-                  final s = sheet.scenes[i];
-                  return SceneRowView(
-                    key: ValueKey(s.id),
-                    scene: s,
-                    sheet: sheet,
-                    controller: controller,
-                    selected: s.id == selectedId,
-                    onSelect: onSelect,
-                    onPlay: onPlay,
-                    playerPositionMs: playerPositionMs,
-                  );
-                },
-              ),
+              child: rows.isEmpty
+                  ? Center(
+                      child: Text('Нет строк под этот фильтр', style: Cs.body.copyWith(color: Cs.inkMuted)),
+                    )
+                  : ListView.builder(
+                      itemCount: rows.length,
+                      itemBuilder: (_, i) {
+                        final s = rows[i];
+                        return SceneRowView(
+                          key: ValueKey(s.id),
+                          scene: s,
+                          sheet: sheet,
+                          controller: controller,
+                          selected: s.id == selectedId,
+                          onSelect: onSelect,
+                          onPlay: onPlay,
+                          playerPositionMs: playerPositionMs,
+                        );
+                      },
+                    ),
             ),
           ],
         );
@@ -65,37 +102,69 @@ class SheetTable extends StatelessWidget {
   }
 }
 
-const _wNumber = 56.0;
-const _wTime = 120.0;
-const _wShot = 150.0;
-const _wActions = 88.0;
+const _wNumber = 52.0;
+const _wTime = 124.0;
+const _wShot = 136.0;
+const _descFlex = 3;
+const _dialogueFlex = 2;
 
 class _Header extends StatelessWidget {
   const _Header();
 
   @override
   Widget build(BuildContext context) {
-    final style = Theme.of(context).textTheme.labelLarge;
-    Widget cell(String text, [double? width]) => width == null
-        ? Expanded(child: Text(text, style: style))
-        : SizedBox(width: width, child: Text(text, style: style));
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Row(children: [
-        cell('№', _wNumber),
-        cell('Начало', _wTime),
-        cell('Конец', _wTime),
-        cell('План', _wShot),
-        cell('Описание'),
-        const SizedBox(width: 12),
-        cell('Диалоги'),
-        const SizedBox(width: _wActions),
-      ]),
+    Widget cell(String text) => Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: CapsLabel(text));
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: const BoxDecoration(
+        color: Cs.surfaceMuted,
+        border: Border(bottom: BorderSide(color: Cs.border)),
+      ),
+      child: Row(
+        children: [
+          SizedBox(width: _wNumber, child: cell('№')),
+          SizedBox(width: _wTime, child: cell('Начало')),
+          SizedBox(width: _wTime, child: cell('Конец')),
+          SizedBox(width: _wShot, child: cell('План')),
+          Expanded(flex: _descFlex, child: cell('Описание')),
+          Expanded(flex: _dialogueFlex, child: cell('Диалоги')),
+        ],
+      ),
     );
   }
 }
 
-/// Одна строка листа.
+/// Синяя точка «изменено вами» в углу ячейки.
+class EditDot extends StatelessWidget {
+  const EditDot({super.key, this.tooltip = 'Изменено вами'});
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(message: tooltip, child: const Dot(Cs.accent, size: 7));
+}
+
+/// Ячейка таблицы: отступы и синяя точка при правке (янтарный фон рисует строка).
+class _Cell extends StatelessWidget {
+  const _Cell({required this.child, this.edited = false, this.editedTip, this.horizontal = 12});
+  final Widget child;
+  final bool edited;
+  final String? editedTip;
+  final double horizontal;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.fromLTRB(horizontal, 8, horizontal, 8),
+    child: Stack(
+      clipBehavior: Clip.none,
+      children: [
+        child,
+        if (edited) Positioned(top: 0, right: -4, child: EditDot(tooltip: editedTip ?? 'Изменено вами')),
+      ],
+    ),
+  );
+}
+
+/// Одна строка листа. Клик выделяет строку и перематывает плеер, правый клик — действия со строкой.
 class SceneRowView extends StatelessWidget {
   const SceneRowView({
     super.key,
@@ -120,67 +189,98 @@ class SceneRowView extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = scene;
     final ro = controller.readOnly;
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: selected ? scheme.primaryContainer.withValues(alpha: 0.35) : Colors.transparent,
-      child: InkWell(
-        onTap: () => onSelect?.call(s),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (e) {
+        if (e.buttons == kPrimaryButton && !selected) onSelect?.call(s);
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onDoubleTap: onPlay == null ? null : () => onPlay!(s),
+        onSecondaryTapDown: ro
+            ? null
+            : (d) {
+                onSelect?.call(s);
+                showRowMenu(
+                  context,
+                  d.globalPosition,
+                  scene: s,
+                  sheet: sheet,
+                  controller: controller,
+                  playerPositionMs: playerPositionMs,
+                );
+              },
+        child: Container(
+          decoration: BoxDecoration(
+            color: selected ? Cs.accentSoft : null,
+            border: const Border(bottom: BorderSide(color: Cs.divider)),
+          ),
+          child: Stack(
             children: [
-              SizedBox(
-                width: _wNumber,
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Row(children: [
-                    Text('${s.index + 1}', style: Theme.of(context).textTheme.titleMedium),
-                    if (s.origin == 'user')
-                      const Tooltip(message: 'Строка добавлена вручную', child: Icon(Icons.person, size: 14)),
-                    if (s.needsEnrichment)
-                      const Tooltip(
-                        message: 'Границы изменены вручную: план и описание могут не соответствовать новым границам',
-                        child: Icon(Icons.warning_amber, size: 14, color: Colors.orange),
-                      ),
-                  ]),
-                ),
-              ),
-              SizedBox(
-                width: _wTime,
-                child: TimecodeField(
-                  ms: s.startMs,
-                  fps: sheet.fps,
-                  edited: s.isEdited('start_ms'),
-                  enabled: !ro,
-                  onCommit: (ms) => controller.patch(s.id, {'start_ms': ms}),
-                ),
-              ),
-              SizedBox(
-                width: _wTime,
-                child: TimecodeField(
-                  ms: s.endMs,
-                  fps: sheet.fps,
-                  edited: s.isEdited('end_ms'),
-                  enabled: !ro,
-                  onCommit: (ms) => controller.patch(s.id, {'end_ms': ms}),
-                ),
-              ),
-              SizedBox(width: _wShot, child: _ShotTypeCell(scene: s, sheet: sheet, controller: controller)),
-              Expanded(child: _DescriptionCell(scene: s, controller: controller)),
-              const SizedBox(width: 12),
-              Expanded(child: _DialogueCell(scene: s, sheet: sheet, controller: controller)),
-              SizedBox(
-                width: _wActions,
-                child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-                  if (onPlay != null)
-                    IconButton(
-                      tooltip: 'Воспроизвести сцену',
-                      icon: const Icon(Icons.play_circle_outline),
-                      onPressed: () => onPlay!(s),
+              // Янтарный фон ячеек с низкой уверенностью на всю высоту строки.
+              Positioned.fill(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const SizedBox(width: _wNumber + 2 * _wTime),
+                    SizedBox(
+                      width: _wShot,
+                      child: ColoredBox(color: s.lowConfidence('shot_type') ? Cs.warnSoft : Colors.transparent),
                     ),
-                  if (!ro) _RowMenu(scene: s, sheet: sheet, controller: controller, playerPositionMs: playerPositionMs),
-                ]),
+                    Expanded(
+                      flex: _descFlex,
+                      child: ColoredBox(color: s.lowConfidence('description') ? Cs.warnSoft : Colors.transparent),
+                    ),
+                    const Expanded(flex: _dialogueFlex, child: SizedBox.shrink()),
+                  ],
+                ),
+              ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: _wNumber,
+                    child: _NumberCell(scene: s, selected: selected),
+                  ),
+                  SizedBox(
+                    width: _wTime,
+                    child: _Cell(
+                      horizontal: 6,
+                      edited: s.isEdited('start_ms'),
+                      child: TimecodeField(
+                        ms: s.startMs,
+                        fps: sheet.fps,
+                        enabled: !ro,
+                        onCommit: (ms) => controller.patch(s.id, {'start_ms': ms}),
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: _wTime,
+                    child: _Cell(
+                      horizontal: 6,
+                      edited: s.isEdited('end_ms'),
+                      child: TimecodeField(
+                        ms: s.endMs,
+                        fps: sheet.fps,
+                        enabled: !ro,
+                        onCommit: (ms) => controller.patch(s.id, {'end_ms': ms}),
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: _wShot,
+                    child: _ShotTypeCell(scene: s, sheet: sheet, controller: controller),
+                  ),
+                  Expanded(
+                    flex: _descFlex,
+                    child: _DescriptionCell(scene: s, controller: controller),
+                  ),
+                  Expanded(
+                    flex: _dialogueFlex,
+                    child: _DialogueCell(scene: s, sheet: sheet, controller: controller),
+                  ),
+                ],
               ),
             ],
           ),
@@ -190,7 +290,38 @@ class SceneRowView extends StatelessWidget {
   }
 }
 
-/// Отметка «изменено вручную» с подсказкой авто-значения и кнопкой сброса (FR-C9, ТЗ 6.2).
+class _NumberCell extends StatelessWidget {
+  const _NumberCell({required this.scene, required this.selected});
+  final Scene scene;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = scene;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 14, 4, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('${s.index + 1}', style: Cs.monoText.copyWith(color: selected ? Cs.accentInk : Cs.inkFaint)),
+          const SizedBox(height: 4),
+          if (s.origin == 'user')
+            const Tooltip(
+              message: 'Строка добавлена вручную',
+              child: GIcon(GIcons.pencil, size: 12, color: Cs.accent),
+            ),
+          if (s.needsEnrichment)
+            const Tooltip(
+              message: 'Границы изменены вручную: план и описание могут не соответствовать новым границам',
+              child: GIcon(GIcons.warn, size: 12, color: Cs.warn),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Отметка «Изменено вами · Вернуть авто» под ячейкой (FR-C9, ТЗ 6.2).
 class EditedMark extends StatelessWidget {
   const EditedMark({super.key, required this.autoText, this.differs = false, this.onReset});
 
@@ -201,38 +332,72 @@ class EditedMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = differs ? Colors.orange : Theme.of(context).colorScheme.tertiary;
-    final tip = StringBuffer(differs ? 'Изменено вручную, автоматика теперь предлагает другое' : 'Изменено вручную');
+    final tip = StringBuffer(differs ? 'Автоматика теперь предлагает другое' : 'Значение изменено вручную');
     if (autoText != null) tip.write('\nАвто: $autoText');
-    if (onReset != null) tip.write('\nНажмите, чтобы вернуть авто-значение');
+    const style = TextStyle(fontFamily: Cs.sans, fontSize: 12, height: 16 / 12, color: Cs.accentInk);
     return Tooltip(
       message: tip.toString(),
-      child: InkWell(
-        onTap: onReset,
-        borderRadius: BorderRadius.circular(10),
-        child: Padding(
-          padding: const EdgeInsets.all(2),
-          child: Icon(onReset == null ? Icons.edit : Icons.settings_backup_restore, size: 16, color: color),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Row(
+          children: [
+            const GIcon(GIcons.pencil, size: 12, color: Cs.accentInk),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(text: differs ? 'Изменено вами · авто предлагает другое' : 'Изменено вами'),
+                    if (onReset != null) ...[
+                      const TextSpan(text: ' · '),
+                      TextSpan(
+                        text: 'Вернуть авто',
+                        style: const TextStyle(decoration: TextDecoration.underline, decorationColor: Cs.accentInk),
+                        recognizer: TapGestureRecognizer()..onTap = onReset,
+                        mouseCursor: SystemMouseCursors.click,
+                      ),
+                    ],
+                  ],
+                ),
+                style: style,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
+/// Строка-предупреждение под ячейкой: модель не уверена.
+class LowConfidenceNote extends StatelessWidget {
+  const LowConfidenceNote(this.text, {super.key});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 6),
+    child: Row(
+      children: [
+        const GIcon(GIcons.warn, size: 12, color: Cs.warn),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            text,
+            style: const TextStyle(fontFamily: Cs.sans, fontSize: 12, height: 16 / 12, color: Cs.warn),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 /// Поле таймкода `ЧЧ:ММ:СС:КК`; сохраняется по Enter или потере фокуса.
 class TimecodeField extends StatefulWidget {
-  const TimecodeField({
-    super.key,
-    required this.ms,
-    required this.fps,
-    required this.onCommit,
-    this.edited = false,
-    this.enabled = true,
-  });
+  const TimecodeField({super.key, required this.ms, required this.fps, required this.onCommit, this.enabled = true});
 
   final int ms;
   final double? fps;
-  final bool edited;
   final bool enabled;
   final Future<bool> Function(int ms) onCommit;
 
@@ -250,6 +415,7 @@ class _TimecodeFieldState extends State<TimecodeField> {
     super.initState();
     _focus.addListener(() {
       if (!_focus.hasFocus) _commit();
+      if (mounted) setState(() {});
     });
   }
 
@@ -284,17 +450,29 @@ class _TimecodeFieldState extends State<TimecodeField> {
       focusNode: _focus,
       enabled: widget.enabled,
       onSubmitted: (_) => _commit(),
-      style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()]),
-      decoration: InputDecoration(
-        isDense: true,
-        border: InputBorder.none,
-        errorText: _error,
-        suffixIcon: widget.edited ? const EditedMark(autoText: null) : null,
-        suffixIconConstraints: const BoxConstraints(minWidth: 20, minHeight: 20),
-      ),
+      style: Cs.monoText,
+      decoration: _inlineDecoration(focused: _focus.hasFocus).copyWith(errorText: _error),
     );
   }
 }
+
+/// Поле внутри ячейки: без рамки, при фокусе — синяя рамка и мягкое свечение.
+InputDecoration _inlineDecoration({bool focused = false, String? hint}) => InputDecoration(
+  isDense: true,
+  filled: focused,
+  fillColor: Cs.surface,
+  hintText: hint,
+  contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+  border: InputBorder.none,
+  enabledBorder: InputBorder.none,
+  disabledBorder: InputBorder.none,
+  focusedBorder: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(6),
+    borderSide: const BorderSide(color: Cs.accent),
+  ),
+);
+
+const _resetValue = '__auto__';
 
 class _ShotTypeCell extends StatelessWidget {
   const _ShotTypeCell({required this.scene, required this.sheet, required this.controller});
@@ -308,32 +486,61 @@ class _ShotTypeCell extends StatelessWidget {
     final auto = s.auto['shot_type'];
     final autoText = auto?.value is String ? shotTypeLabels[auto!.value] ?? '${auto.value}' : null;
     final low = s.lowConfidence('shot_type');
-    return Container(
-      decoration: low ? _lowConfidence : null,
-      child: Row(children: [
-        Expanded(
-          child: Tooltip(
-            message: low ? 'Автоматика не уверена (${_percent(auto?.confidence)})' : '',
-            child: DropdownButton<String?>(
-              value: s.shotType,
-              isExpanded: true,
-              underline: const SizedBox.shrink(),
-              hint: const Text('—'),
-              items: [
-                for (final code in sheet.shotTypes)
-                  DropdownMenuItem(value: code, child: Text(shotTypeLabels[code] ?? code)),
-              ],
-              onChanged: controller.readOnly ? null : (v) => controller.patch(s.id, {'shot_type': v}),
-            ),
+    final edited = s.isEdited('shot_type');
+    final color = low ? Cs.warn : Cs.ink;
+    return _Cell(
+      edited: edited,
+      editedTip: autoText == null ? null : 'Изменено вами · авто: $autoText',
+      child: Tooltip(
+        message: low ? 'Модель не уверена в плане (${percent(auto?.confidence)})' : '',
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String?>(
+            value: s.shotType,
+            isExpanded: true,
+            isDense: true,
+            borderRadius: BorderRadius.circular(12),
+            dropdownColor: Cs.surface,
+            icon: const GIcon(GIcons.chevronDown, size: 14, color: Cs.inkFaint),
+            style: Cs.body.copyWith(color: color),
+            hint: Text('—', style: Cs.body.copyWith(color: Cs.inkFaint)),
+            selectedItemBuilder: (_) => [
+              for (final code in sheet.shotTypes)
+                Row(
+                  children: [
+                    if (low) ...[
+                      const GIcon(GIcons.warn, size: 14, color: Cs.warn, semanticLabel: 'Низкая уверенность'),
+                      const SizedBox(width: 6),
+                    ],
+                    Flexible(child: Text(shotTypeLabels[code] ?? code, overflow: TextOverflow.ellipsis)),
+                  ],
+                ),
+              if (edited && autoText != null) const SizedBox.shrink(),
+            ],
+            items: [
+              for (final code in sheet.shotTypes)
+                DropdownMenuItem(
+                  value: code,
+                  child: Text(shotTypeLabels[code] ?? code, style: Cs.body),
+                ),
+              if (edited && autoText != null)
+                DropdownMenuItem(
+                  value: _resetValue,
+                  child: Row(
+                    children: [
+                      const GIcon(GIcons.reset, color: Cs.inkMuted),
+                      const SizedBox(width: 8),
+                      Text('Вернуть авто: $autoText (${percent(auto?.confidence)})', style: Cs.small),
+                    ],
+                  ),
+                ),
+            ],
+            onChanged: controller.readOnly
+                ? null
+                : (v) =>
+                      v == _resetValue ? controller.reset(s.id, 'shot_type') : controller.patch(s.id, {'shot_type': v}),
           ),
         ),
-        if (s.isEdited('shot_type'))
-          EditedMark(
-            autoText: autoText,
-            differs: s.autoDiffers('shot_type'),
-            onReset: controller.readOnly ? null : () => controller.reset(s.id, 'shot_type'),
-          ),
-      ]),
+      ),
     );
   }
 }
@@ -360,6 +567,7 @@ class _DescriptionCellState extends State<_DescriptionCell> {
     _saved = _text.text;
     _focus.addListener(() {
       if (!_focus.hasFocus) _save();
+      if (mounted) setState(() {});
     });
   }
 
@@ -400,29 +608,33 @@ class _DescriptionCellState extends State<_DescriptionCell> {
     final s = widget.scene;
     final auto = s.auto['description'];
     final low = s.lowConfidence('description');
-    return Container(
-      decoration: low ? _lowConfidence : null,
-      child: TextField(
-        controller: _text,
-        focusNode: _focus,
-        enabled: !widget.controller.readOnly,
-        minLines: 1,
-        maxLines: 4,
-        onChanged: _onChanged,
-        decoration: InputDecoration(
-          isDense: true,
-          border: InputBorder.none,
-          hintText: s.status == 'detected' ? 'Описание появится после обогащения' : 'Описание',
-          helperText: low ? 'Автоматика не уверена (${_percent(auto?.confidence)})' : null,
-          suffixIcon: s.isEdited('description')
-              ? EditedMark(
-                  autoText: auto?.value as String?,
-                  differs: s.autoDiffers('description'),
-                  onReset: widget.controller.readOnly ? null : () => widget.controller.reset(s.id, 'description'),
-                )
-              : null,
-          suffixIconConstraints: const BoxConstraints(minWidth: 20, minHeight: 20),
-        ),
+    final ro = widget.controller.readOnly;
+    return _Cell(
+      edited: s.isEdited('description'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            controller: _text,
+            focusNode: _focus,
+            enabled: !ro,
+            minLines: 1,
+            maxLines: 4,
+            onChanged: _onChanged,
+            style: Cs.body,
+            decoration: _inlineDecoration(
+              focused: _focus.hasFocus,
+              hint: s.status == 'detected' ? 'Описание появится после обогащения' : 'Описание',
+            ),
+          ),
+          if (s.isEdited('description'))
+            EditedMark(
+              autoText: auto?.value as String?,
+              differs: s.autoDiffers('description'),
+              onReset: ro ? null : () => widget.controller.reset(s.id, 'description'),
+            ),
+          if (low) LowConfidenceNote('Модель не уверена в описании (${percent(auto?.confidence)})'),
+        ],
       ),
     );
   }
@@ -437,275 +649,72 @@ class _DialogueCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = scene;
-    final theme = Theme.of(context);
+    final ro = controller.readOnly;
     return InkWell(
-      onTap: controller.readOnly
+      onTap: ro
           ? null
           : () => showDialog<void>(
-                context: context,
-                builder: (_) => ReplicasDialog(scene: s, sheet: sheet, controller: controller),
-              ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        child: s.replicas.isEmpty
-            ? Text(controller.readOnly ? '' : 'Добавить реплику', style: TextStyle(color: theme.hintColor))
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (final r in s.replicas)
-                    Tooltip(
-                      message: !r.matched && r.origin == 'auto'
-                          ? 'Реплика не найдена в сценарии${r.role == null ? ', говорящий не определён' : ''}'
-                          : '',
-                      child: Text.rich(
-                        TextSpan(children: [
-                          TextSpan(
-                            text: r.role == null ? '?: ' : '${r.role}: ',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          TextSpan(text: r.text),
-                          if (r.edited.isNotEmpty) const TextSpan(text: ' ✎'),
-                        ]),
-                        style: !r.matched && r.origin == 'auto'
-                            ? TextStyle(color: Colors.orange.shade800, fontStyle: FontStyle.italic)
-                            : null,
-                      ),
-                    ),
-                ],
-              ),
-      ),
-    );
-  }
-}
-
-class _RowMenu extends StatelessWidget {
-  const _RowMenu({required this.scene, required this.sheet, required this.controller, this.playerPositionMs});
-  final Scene scene;
-  final SceneSheet sheet;
-  final SheetController controller;
-  final int Function()? playerPositionMs;
-
-  @override
-  Widget build(BuildContext context) {
-    final s = scene;
-    final at = playerPositionMs?.call();
-    final atInside = at != null && at > s.startMs && at < s.endMs;
-    final isLast = s.index == sheet.scenes.length - 1;
-    return PopupMenuButton<String>(
-      tooltip: 'Действия со строкой',
-      onSelected: (action) async {
-        switch (action) {
-          case 'split-player':
-            await controller.split(s.id, at!);
-          case 'split-middle':
-            await controller.split(s.id, (s.startMs + s.endMs) ~/ 2);
-          case 'merge':
-            await controller.mergeWithNext(s.id);
-          case 'delete':
-            if (!context.mounted) return;
-            final ok = await showDialog<bool>(
               context: context,
-              builder: (c) => AlertDialog(
-                title: Text('Удалить строку ${s.index + 1}?'),
-                content: const Text('Реплики строки удалятся вместе с ней.'),
-                actions: [
-                  TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Отмена')),
-                  FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Удалить')),
-                ],
+              builder: (_) => ReplicasDialog(scene: s, sheet: sheet, controller: controller),
+            ),
+      child: _Cell(
+        edited: s.replicas.any((r) => r.edited.isNotEmpty || r.origin == 'user'),
+        child: s.replicas.isEmpty
+            ? Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+                child: Text(ro ? '—' : 'Добавить реплику', style: Cs.body.copyWith(color: Cs.inkFaint)),
+              )
+            : Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final (i, r) in s.replicas.indexed) ...[
+                      if (i > 0) const SizedBox(height: 6),
+                      _ReplicaView(replica: r),
+                    ],
+                  ],
+                ),
               ),
-            );
-            if (ok == true) await controller.delete(s.id);
-        }
-      },
-      itemBuilder: (_) => [
-        PopupMenuItem(
-          value: 'split-player',
-          enabled: atInside,
-          child: Text(atInside ? 'Разрезать на ${timecode(at, sheet.fps)}' : 'Разрезать по позиции плеера'),
-        ),
-        const PopupMenuItem(value: 'split-middle', child: Text('Разрезать посередине')),
-        PopupMenuItem(value: 'merge', enabled: !isLast, child: const Text('Объединить со следующей')),
-        const PopupMenuItem(value: 'delete', child: Text('Удалить строку')),
-      ],
+      ),
     );
   }
 }
 
-/// Правка реплик строки (FR-C5): роль, текст, порядок, добавление, удаление, перенос в соседнюю строку.
-class ReplicasDialog extends StatefulWidget {
-  const ReplicasDialog({super.key, required this.scene, required this.sheet, required this.controller});
-  final Scene scene;
-  final SceneSheet sheet;
-  final SheetController controller;
-
-  @override
-  State<ReplicasDialog> createState() => _ReplicasDialogState();
-}
-
-class _Draft {
-  _Draft(this.source, String? role, String text)
-      : role = TextEditingController(text: role ?? ''),
-        text = TextEditingController(text: text);
-  final Replica? source;
-  final TextEditingController role;
-  final TextEditingController text;
-  final FocusNode roleFocus = FocusNode();
-  final Set<String> reset = {};
-}
-
-class _ReplicasDialogState extends State<ReplicasDialog> {
-  late final List<_Draft> _drafts = [for (final r in widget.scene.replicas) _Draft(r, r.role, r.text)];
-  bool _saving = false;
-
-  @override
-  void dispose() {
-    for (final d in _drafts) {
-      d.role.dispose();
-      d.text.dispose();
-      d.roleFocus.dispose();
-    }
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    setState(() => _saving = true);
-    final items = [
-      for (final d in _drafts)
-        if (d.text.text.trim().isNotEmpty)
-          {
-            if (d.source?.id != null) 'id': d.source!.id,
-            'role': d.role.text.trim().isEmpty ? null : d.role.text.trim(),
-            'text': d.text.text.trim(),
-            if (d.reset.isNotEmpty) 'reset': d.reset.toList(),
-          },
-    ];
-    final ok = await widget.controller.putReplicas(widget.scene.id, items);
-    if (mounted) {
-      setState(() => _saving = false);
-      if (ok) Navigator.pop(context);
-    }
-  }
-
-  Future<void> _move(_Draft d, int delta) async {
-    setState(() => _saving = true);
-    final ok = await widget.controller.moveReplica(widget.scene.id, d.source!.id!, delta);
-    if (mounted) {
-      setState(() => _saving = false);
-      if (ok) Navigator.pop(context);
-    }
-  }
+class _ReplicaView extends StatelessWidget {
+  const _ReplicaView({required this.replica});
+  final Replica replica;
 
   @override
   Widget build(BuildContext context) {
-    final s = widget.scene;
-    final last = widget.sheet.scenes.length - 1;
-    return AlertDialog(
-      title: Text('Реплики строки ${s.index + 1}'),
-      content: SizedBox(
-        width: 760,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final (i, d) in _drafts.indexed)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    SizedBox(
-                      width: 170,
-                      child: RawAutocomplete<String>(
-                        textEditingController: d.role,
-                        focusNode: d.roleFocus,
-                        optionsBuilder: (v) => widget.sheet.roles
-                            .where((r) => r.toLowerCase().startsWith(v.text.toLowerCase())),
-                        fieldViewBuilder: (context, controller, focus, _) => TextField(
-                          controller: controller,
-                          focusNode: focus,
-                          decoration: const InputDecoration(labelText: 'Роль', isDense: true),
-                        ),
-                        optionsViewBuilder: (context, onSelected, options) => Align(
-                          alignment: Alignment.topLeft,
-                          child: Material(
-                            elevation: 4,
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxHeight: 200, maxWidth: 220),
-                              child: ListView(
-                                shrinkWrap: true,
-                                children: [
-                                  for (final o in options) ListTile(dense: true, title: Text(o), onTap: () => onSelected(o)),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: d.text,
-                        enabled: !d.reset.contains('text'),
-                        minLines: 1,
-                        maxLines: 4,
-                        decoration: InputDecoration(
-                          labelText: 'Текст',
-                          isDense: true,
-                          helperText: d.reset.contains('text')
-                              ? 'Будет возвращён текст из автоматики'
-                              : d.source?.spokenText != null && d.source!.spokenText != d.source!.text
-                                  ? 'Сказано: ${d.source!.spokenText}'
-                                  : null,
-                        ),
-                      ),
-                    ),
-                    if (d.source?.edited.contains('text') ?? false)
-                      IconButton(
-                        tooltip: 'Вернуть текст из автоматики',
-                        icon: const Icon(Icons.settings_backup_restore),
-                        onPressed: () => setState(() => d.reset.contains('text') ? d.reset.remove('text') : d.reset.add('text')),
-                      ),
-                    IconButton(
-                      tooltip: 'Выше',
-                      icon: const Icon(Icons.arrow_upward),
-                      onPressed: i == 0 ? null : () => setState(() => _drafts.insert(i - 1, _drafts.removeAt(i))),
-                    ),
-                    PopupMenuButton<int>(
-                      tooltip: 'Перенести',
-                      enabled: d.source?.id != null && !_saving,
-                      icon: const Icon(Icons.drive_file_move_outline),
-                      onSelected: (delta) => _move(d, delta),
-                      itemBuilder: (_) => [
-                        PopupMenuItem(value: -1, enabled: s.index > 0, child: const Text('В предыдущую строку')),
-                        PopupMenuItem(value: 1, enabled: s.index < last, child: const Text('В следующую строку')),
-                      ],
-                    ),
-                    IconButton(
-                      tooltip: 'Удалить реплику',
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: () => setState(() => _drafts.removeAt(i)),
-                    ),
-                  ]),
-                ),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () => setState(() => _drafts.add(_Draft(null, null, ''))),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Добавить реплику'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: _saving ? null : () => Navigator.pop(context), child: const Text('Отмена')),
-        FilledButton(onPressed: _saving ? null : _save, child: const Text('Сохранить')),
+    final r = replica;
+    final unmatched = !r.matched && r.origin == 'auto';
+    final roleStyle = TextStyle(
+      fontFamily: Cs.sans,
+      fontSize: 11,
+      height: 16 / 11,
+      letterSpacing: 0.55,
+      fontWeight: FontWeight.w700,
+      color: unmatched ? Cs.warn : Cs.inkSoft,
+    );
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(r.role == null ? '? НЕ РАСПОЗНАНО' : r.role!.toUpperCase(), style: roleStyle),
+        Text(r.text, style: Cs.body.copyWith(color: unmatched ? Cs.warn : Cs.ink)),
       ],
+    );
+    return Tooltip(
+      message: unmatched ? 'Реплика не найдена в сценарии${r.role == null ? ', говорящий не определён' : ''}' : '',
+      child: unmatched
+          ? Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(color: Cs.warnSoft, borderRadius: BorderRadius.circular(6)),
+              child: body,
+            )
+          : body,
     );
   }
 }
 
-const _lowConfidence = BoxDecoration(color: Color(0x33FFC107), borderRadius: BorderRadius.all(Radius.circular(4)));
-
-String _percent(double? c) => c == null ? '?' : '${(c * 100).round()} %';
+String percent(double? c) => c == null ? '?' : '${(c * 100).round()}%';

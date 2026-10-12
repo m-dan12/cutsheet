@@ -5,6 +5,7 @@ import 'package:media_kit/media_kit.dart';
 import 'src/api.dart';
 import 'src/screens/login_screen.dart';
 import 'src/screens/projects_screen.dart';
+import 'src/ui/theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,7 +28,8 @@ class _CutsheetAppState extends State<CutsheetApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'CutSheet',
-      theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
+      theme: cutsheetTheme(),
+      debugShowCheckedModeBanner: false,
       locale: const Locale('ru'),
       supportedLocales: const [Locale('ru'), Locale('en')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
@@ -37,8 +39,7 @@ class _CutsheetAppState extends State<CutsheetApp> {
           if (!snap.hasData) return const Scaffold(body: Center(child: CircularProgressIndicator()));
           return ListenableBuilder(
             listenable: widget.api,
-            builder: (_, _) =>
-                widget.api.signedIn ? ProjectsScreen(api: widget.api) : LoginScreen(api: widget.api),
+            builder: (_, _) => widget.api.signedIn ? ProjectsScreen(api: widget.api) : LoginScreen(api: widget.api),
           );
         },
       ),

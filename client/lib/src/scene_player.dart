@@ -17,6 +17,7 @@ class ScenePlayer {
   int? _stopAtMs;
 
   Stream<Duration> get position => player.stream.position;
+  Stream<bool> get playing => player.stream.playing;
   int get positionMs => player.state.position.inMilliseconds;
 
   /// Открывает видео, если URL сменился (presigned URL живёт не дольше часа и обновляется с листом).
