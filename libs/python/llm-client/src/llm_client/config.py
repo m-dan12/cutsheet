@@ -18,6 +18,9 @@ class LLMConfig:
     structured: str = "json_schema"
     temperature: float = 0.0
     max_concurrency: int = 2                      # локальная модель упирается в GPU
+    rate_limit_rpm: float = 0.0                   # запросов в минуту из процесса; 0 — без лимита (внешний API)
+    breaker_failures: int = 5                     # подряд неудачных вызовов до размыкания (circuit breaker)
+    breaker_cooldown_s: float = 60.0              # сколько цепь разомкнута до пробного вызова
 
     @classmethod
     def from_env(cls, prefix: str = "LLM_") -> "LLMConfig":
@@ -32,4 +35,7 @@ class LLMConfig:
             structured=e("STRUCTURED", cls.structured),
             temperature=float(e("TEMPERATURE", str(cls.temperature))),
             max_concurrency=int(e("MAX_CONCURRENCY", str(cls.max_concurrency))),
+            rate_limit_rpm=float(e("RATE_LIMIT_RPM", str(cls.rate_limit_rpm))),
+            breaker_failures=int(e("BREAKER_FAILURES", str(cls.breaker_failures))),
+            breaker_cooldown_s=float(e("BREAKER_COOLDOWN_S", str(cls.breaker_cooldown_s))),
         )

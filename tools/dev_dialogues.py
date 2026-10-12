@@ -2,10 +2,12 @@
 
 Создаёт проект в PostgreSQL (как Project API), кладёт видео и сценарий в MinIO, публикует
 video.uploaded и script.uploaded и ждёт script.parsed, dialogue.aligned и по одному
-scene.ready-for-enrichment на каждую сцену.
+scene.ready-for-enrichment на каждую сцену. С --enrichment (этап 3) ждёт ещё два scene.enriched
+на сцену (план и описание) и статус проекта ready_for_review.
 
     python tools/dev_dialogues.py tools/sample.mp4 tools/sample_script.docx
     python tools/dev_dialogues.py --speech      # ролик с озвучкой реплик (нужен espeak-ng)
+    python tools/dev_dialogues.py --enrichment  # до готового листа
 """
 
 from __future__ import annotations
@@ -56,6 +58,7 @@ def main() -> int:
     ap.add_argument("video", type=Path, nargs="?", default=ROOT / "tools" / "sample.mp4")
     ap.add_argument("script", type=Path, nargs="?", default=ROOT / "tools" / "sample_script.docx")
     ap.add_argument("--speech", action="store_true", help="сгенерировать ролик с речью (espeak-ng)")
+    ap.add_argument("--enrichment", action="store_true", help="ждать обогащения и ready_for_review (этап 3)")
     ap.add_argument("--timeout", type=float, default=600)
     args = ap.parse_args()
 
@@ -83,7 +86,7 @@ def main() -> int:
     consumer = Consumer({"bootstrap.servers": os.environ["KAFKA_BOOTSTRAP"],
                          "group.id": f"dev-dialogues-{project_id}", "auto.offset.reset": "latest"})
     consumer.subscribe(["scenes.detected", "script.parsed", "dialogue.aligned", "scene.ready-for-enrichment",
-                        "project.status-changed", "pipeline.failed"])
+                        "scene.enriched", "project.status-changed", "pipeline.failed"])
     deadline = time.time() + 30
     while not consumer.assignment() and time.time() < deadline:
         consumer.poll(0.5)
@@ -98,9 +101,19 @@ def main() -> int:
 
     scenes_total: int | None = None
     ready: list[dict] = []
+    enriched: dict[str, dict[str, dict]] = {}   # scene_id → source → payload
+    review = False
     seen: set[str] = set()
+
+    def done() -> bool:
+        if scenes_total is None or len(ready) < scenes_total:
+            return False
+        if not args.enrichment:
+            return True
+        return review and all(len(enriched.get(r["scene_id"], {})) == 2 for r in ready)
+
     deadline = time.time() + args.timeout
-    while time.time() < deadline and (scenes_total is None or len(ready) < scenes_total):
+    while time.time() < deadline and not done():
         msg = consumer.poll(1.0)
         if msg is None or msg.error():
             continue
@@ -122,18 +135,28 @@ def main() -> int:
             print(f"dialogue.aligned: {json.dumps(p.get('stats'), ensure_ascii=False)}")
         elif t == "scene.ready-for-enrichment":
             ready.append(p)
+        elif t == "scene.enriched":
+            enriched.setdefault(p["scene_id"], {})[p["source"]] = p
         else:
+            if t == "project.status-changed" and p["status"] == "ready_for_review":
+                review = True
             print(f"{t}: {json.dumps(p, ensure_ascii=False)}")
     consumer.close()
 
     for p in sorted(ready, key=lambda s: s["index"]):
-        print(f"  #{p['index']} {p['start_ms']}–{p['end_ms']} ms")
+        e = enriched.get(p["scene_id"], {})
+        shot = e.get("shot_type", {})
+        print(f"  #{p['index']} {p['start_ms']}–{p['end_ms']} ms"
+              + (f"  план {shot.get('shot_type')} ({shot.get('confidence')})" if shot else ""))
+        if "description" in e:
+            print(f"      {e['description']['description']}")
         for r in p.get("replicas", []):
             print(f"      {r['start_ms']:>6} {r['role'] or '?'}: {r['text']}")
-    if scenes_total is not None and len(ready) == scenes_total and {"script.parsed", "dialogue.aligned"} <= seen:
+    if done() and {"script.parsed", "dialogue.aligned"} <= seen:
         print("OK")
         return 0
-    print(f"timeout, seen: {sorted(seen)}, ready {len(ready)}/{scenes_total}")
+    print(f"timeout, seen: {sorted(seen)}, ready {len(ready)}/{scenes_total}, enriched {len(enriched)}, "
+          f"review {review}")
     return 1
 
 

@@ -41,7 +41,16 @@
           "$ref": "../defs.v1.json#/$defs/confidence"
         },
         "prompt_version": {
-          "type": "string"
+          "type": "string",
+          "description": "Версия промпта (Scene Description) или алгоритма (Shot Type)"
+        },
+        "model": {
+          "type": "string",
+          "description": "Модель, давшая результат (LLM или детектор)"
+        },
+        "request_event_id": {
+          "$ref": "../defs.v1.json#/$defs/uuid",
+          "description": "event_id запроса scene.ready-for-enrichment: Aggregator отбрасывает ответы на устаревший запрос"
         }
       },
       "oneOf": [

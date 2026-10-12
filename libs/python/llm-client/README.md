@@ -24,5 +24,11 @@
 | `LLM_STRUCTURED` | `json_schema` | `json_schema`, `json_object` или `none` |
 | `LLM_TEMPERATURE` | 0 | |
 | `LLM_MAX_CONCURRENCY` | 2 | одновременных запросов из процесса |
+| `LLM_RATE_LIMIT_RPM` | 0 | запросов в минуту из процесса (внешний API); 0 — без лимита |
+| `LLM_BREAKER_FAILURES` | 5 | неудачных вызовов подряд, после которых цепь размыкается |
+| `LLM_BREAKER_COOLDOWN_S` | 60 | пауза разомкнутой цепи до пробного вызова |
 
-Circuit breaker и rate limit для внешнего API (FR-SDS4) — этап 3 вместе с Scene Description.
+Circuit breaker (FR-SDS4): вызов, который не удался после всех повторов транспорта, считается
+неудачным; после `LLM_BREAKER_FAILURES` таких подряд следующие вызовы сразу получают
+`LLMCircuitOpen`, пока не пройдёт `LLM_BREAKER_COOLDOWN_S`. Ошибки запроса (4xx кроме 429)
+цепь не размыкают.

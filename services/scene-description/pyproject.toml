@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scene-description"
+version = "0.1.0"
+description = "Scene Description: описание сцены по ключевым кадрам (мультимодальная LLM)"
+requires-python = ">=3.11"
+dependencies = [
+  "cutsheet-common",
+  "llm-client",
+  "pillow>=10",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+scene-description = "scene_description.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+scene_description = ["prompts/*.txt"]

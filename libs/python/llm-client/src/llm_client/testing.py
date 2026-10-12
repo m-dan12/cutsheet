@@ -34,6 +34,8 @@ class FakeLLMServer:
             "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         })
 
-    def client(self, **config: Any) -> LLMClient:
+    def client(self, *, sleep: Callable[[float], None] = lambda _: None, clock: Callable[[], float] | None = None,
+               **config: Any) -> LLMClient:
         cfg = LLMConfig(**{"base_url": "http://fake-llm/v1", "model": "fake", "backoff_s": 0, **config})
-        return LLMClient(cfg, transport=httpx.MockTransport(self._handle), sleep=lambda _: None)
+        extra = {"clock": clock} if clock else {}
+        return LLMClient(cfg, transport=httpx.MockTransport(self._handle), sleep=sleep, **extra)
