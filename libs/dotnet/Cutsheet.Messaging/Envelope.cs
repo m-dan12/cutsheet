@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Cutsheet.Aggregator;
+namespace Cutsheet.Messaging;
 
 /// <summary>Конверт события (ТЗ 4.1, contracts/schemas/envelope.v1.json).</summary>
 public sealed record Envelope(
@@ -14,7 +14,7 @@ public sealed record Envelope(
     [property: JsonPropertyName("payload")] JsonElement Payload,
     [property: JsonPropertyName("producer")] string? Producer = null)
 {
-    public static Envelope Create(string eventType, Guid projectId, Guid correlationId, object payload) =>
+    public static Envelope Create(string eventType, Guid projectId, Guid correlationId, object payload, string producer) =>
         new(Guid.NewGuid(), eventType, 1, projectId, correlationId, DateTimeOffset.UtcNow,
-            JsonSerializer.SerializeToElement(payload), "aggregator");
+            JsonSerializer.SerializeToElement(payload), producer);
 }

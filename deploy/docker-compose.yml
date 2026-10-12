@@ -2,6 +2,7 @@ name: cutsheet
 
 # Локальное окружение cutsheet (ТЗ, раздел 8). Запуск из корня: make up
 # Внешние порты: Kong 8000 (API), Kafka 9094, PostgreSQL 5432, MinIO 9000 (S3) / 9001 (консоль).
+# Клиент ходит в Kong (API, SignalR) и напрямую в MinIO по presigned URL (S3_PUBLIC_ENDPOINT).
 
 x-python-env: &python-env
   KAFKA_BOOTSTRAP: kafka:9092
@@ -100,15 +101,20 @@ services:
 
   kong:
     image: kong:3.9
+    # start.sh ждёт публичный ключ Auth Service и подставляет его в consumer плагина jwt.
+    entrypoint: ["/bin/sh", "/kong/start.sh"]
+    depends_on:
+      auth: { condition: service_started }
     environment:
       KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
       KONG_PROXY_LISTEN: 0.0.0.0:8000
       KONG_ADMIN_LISTEN: 0.0.0.0:8001
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
     ports: ["8000:8000", "127.0.0.1:8001:8001"]
-    volumes: [./kong/kong.yml:/kong/kong.yml:ro]
+    volumes:
+      - ./kong:/kong:ro
+      - auth-keys:/keys:ro
     healthcheck:
       test: ["CMD", "kong", "health"]
       interval: 5s
@@ -134,7 +140,11 @@ services:
   auth:
     build: { context: .., dockerfile: services/auth/Dockerfile }
     image: cutsheet/auth:dev
-    environment: *dotnet-env
+    environment:
+      <<: *dotnet-env
+      Auth__KeyDir: /keys
+      Auth__AccessMinutes: ${AUTH_ACCESS_MINUTES:-15}
+    volumes: [auth-keys:/keys]    # закрытый ключ подписи JWT; публичный читают Kong и Project API
     depends_on:
       postgres: { condition: service_healthy }
     restart: unless-stopped
@@ -142,10 +152,19 @@ services:
   project-api:
     build: { context: .., dockerfile: services/project-api/Dockerfile }
     image: cutsheet/project-api:dev
-    environment: *dotnet-env
+    environment:
+      <<: *dotnet-env
+      Auth__PublicKeyPath: /keys/jwt-public.pem
+      S3__Endpoint: http://minio:9000
+      S3__PublicEndpoint: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+      S3__AccessKey: ${S3_ACCESS_KEY:-cutsheet}
+      S3__SecretKey: ${S3_SECRET_KEY:-cutsheet-secret}
+      S3__Bucket: ${S3_BUCKET:-cutsheet}
+    volumes: [auth-keys:/keys:ro]
     depends_on:
       postgres: { condition: service_healthy }
       kafka-init: { condition: service_completed_successfully }
+      minio-init: { condition: service_completed_successfully }
     restart: unless-stopped
 
   aggregator:
@@ -158,6 +177,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  auth-keys:
   kafka-data:
   pg-data:
   minio-data:

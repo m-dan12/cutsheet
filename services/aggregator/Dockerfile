@@ -1,10 +1,12 @@
 # Сборка из корня репозитория: docker build -f services/aggregator/Dockerfile .
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
-COPY services/aggregator/Aggregator.csproj .
-RUN dotnet restore
-COPY services/aggregator/ .
-RUN dotnet publish -c Release -o /out --no-restore
+COPY libs/dotnet/Cutsheet.Messaging/Cutsheet.Messaging.csproj libs/dotnet/Cutsheet.Messaging/
+COPY services/aggregator/Aggregator.csproj services/aggregator/
+RUN dotnet restore services/aggregator/Aggregator.csproj
+COPY libs/dotnet/ libs/dotnet/
+COPY services/aggregator/ services/aggregator/
+RUN dotnet publish services/aggregator/Aggregator.csproj -c Release -o /out --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app

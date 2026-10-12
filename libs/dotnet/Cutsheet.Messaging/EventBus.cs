@@ -1,7 +1,8 @@
 using System.Text.Json;
 using Confluent.Kafka;
+using Microsoft.Extensions.Configuration;
 
-namespace Cutsheet.Aggregator;
+namespace Cutsheet.Messaging;
 
 /// <summary>Тонкий адаптер брокера (ТЗ 3.3): бизнес-логика не видит Kafka напрямую.</summary>
 public sealed class EventBus : IDisposable
@@ -11,15 +12,22 @@ public sealed class EventBus : IDisposable
     public EventBus(IConfiguration config)
     {
         BootstrapServers = config["Kafka:BootstrapServers"] ?? "localhost:9094";
+        Producer = config["Kafka:ClientId"] ?? AppDomain.CurrentDomain.FriendlyName.ToLowerInvariant();
         _producer = new ProducerBuilder<string, string>(new ProducerConfig
         {
             BootstrapServers = BootstrapServers,
             EnableIdempotence = true,
-            ClientId = "aggregator",
+            ClientId = Producer,
         }).Build();
     }
 
     public string BootstrapServers { get; }
+
+    /// <summary>Имя сервиса-производителя, пишется в поле producer конверта.</summary>
+    public string Producer { get; }
+
+    public Task PublishAsync(string eventType, Guid projectId, Guid correlationId, object payload, CancellationToken ct) =>
+        PublishAsync(Envelope.Create(eventType, projectId, correlationId, payload, Producer), ct);
 
     public async Task PublishAsync(Envelope e, CancellationToken ct)
     {
