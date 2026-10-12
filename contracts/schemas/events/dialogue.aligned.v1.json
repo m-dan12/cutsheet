@@ -28,7 +28,37 @@
           }
         },
         "language": {
-          "type": "string"
+          "type": "string",
+          "description": "Язык речи, определённый или заданный проектом (FR-TA2)"
+        },
+        "model": {
+          "type": "string",
+          "description": "Модель распознавания, например faster-whisper:small"
+        },
+        "transcript_uri": {
+          "$ref": "../defs.v1.json#/$defs/s3_uri"
+        },
+        "stats": {
+          "type": "object",
+          "description": "Сводка сопоставления",
+          "properties": {
+            "script_lines": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "matched_lines": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unmatched_speech": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "words": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
         }
       }
     }

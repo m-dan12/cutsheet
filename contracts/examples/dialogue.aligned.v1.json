@@ -13,7 +13,7 @@
         "role": "ИВАН",
         "text": "Где ты был?",
         "spoken_text": "Где ты был вчера?",
-        "script_line_id": "s1-l2",
+        "script_line_id": "p00003",
         "confidence": 0.82,
         "matched": true
       },
@@ -28,6 +28,14 @@
         "matched": false
       }
     ],
-    "language": "ru"
+    "language": "ru",
+    "model": "faster-whisper:small",
+    "transcript_uri": "s3://cutsheet/projects/3f2b8c1e-5d4a-4e6b-9c7d-1a2b3c4d5e6f/transcript/transcript.json",
+    "stats": {
+      "script_lines": 2,
+      "matched_lines": 1,
+      "unmatched_speech": 1,
+      "words": 7
+    }
   }
 }

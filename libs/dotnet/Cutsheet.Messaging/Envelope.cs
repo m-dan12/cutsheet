@@ -14,7 +14,9 @@ public sealed record Envelope(
     [property: JsonPropertyName("payload")] JsonElement Payload,
     [property: JsonPropertyName("producer")] string? Producer = null)
 {
-    public static Envelope Create(string eventType, Guid projectId, Guid correlationId, object payload, string producer) =>
-        new(Guid.NewGuid(), eventType, 1, projectId, correlationId, DateTimeOffset.UtcNow,
+    /// <param name="eventId">Детерминированный id для повторяемых результатов; по умолчанию случайный.</param>
+    public static Envelope Create(string eventType, Guid projectId, Guid correlationId, object payload, string producer,
+        Guid? eventId = null) =>
+        new(eventId ?? Guid.NewGuid(), eventType, 1, projectId, correlationId, DateTimeOffset.UtcNow,
             JsonSerializer.SerializeToElement(payload), producer);
 }

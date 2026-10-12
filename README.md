@@ -4,9 +4,11 @@
 система собирает черновик листа (сцены, таймкоды, план, описание, реплики по ролям),
 человек проверяет его в клиенте и выгружает в Excel / Word / PDF.
 
-Техническое задание: ТЗ v0.2 (в материалах проекта). Сейчас репозиторий на **этапе 1**
-(видеоветка): пользователь входит в клиенте, создаёт проект, загружает видео прямо в MinIO
-и в реальном времени видит найденные планы с таймкодами и ключевыми кадрами.
+Техническое задание: ТЗ v0.2 (в материалах проекта). Готовы **этап 1** (видеоветка):
+пользователь входит в клиенте, создаёт проект, загружает видео прямо в MinIO и в реальном
+времени видит найденные планы, и **этап 2** (диалоги): Script Parser размечает сценарий через
+LLM, Transcription & Alignment распознаёт речь и сопоставляет её со сценарием, Aggregator
+режет реплики по сценам и публикует `scene.ready-for-enrichment`.
 
 ## Структура
 
@@ -16,13 +18,15 @@
 | `deploy/` | `docker-compose.yml` (Kafka KRaft, PostgreSQL, MinIO, Kong, сервисы), `kong/kong.yml` |
 | `db/migrations/` | SQL-миграции PostgreSQL (схема из ТЗ 6.1) |
 | `libs/python/cutsheet-common` | общий код Python-сервисов: конверт, проверка контрактов, адаптер Kafka, S3, логи |
-| `libs/python/llm-client` | общий слой LLM (заглушка, этап 2) |
+| `libs/python/llm-client` | общий слой LLM: OpenAI-совместимый API (Ollama / vLLM / внешний), JSON по схеме с повтором |
 | `libs/dotnet/Cutsheet.Messaging` | общий код C#-сервисов: конверт, адаптер Kafka, цикл потребителя, дедупликация |
 | `services/scene-detection` | **работает**: PySceneDetect, ключевые кадры в S3 |
+| `services/script-parser` | **работает**: `.docx` → сцены, роли, реплики (LLM или эвристики) |
+| `services/transcription` | **работает**: faster-whisper / WhisperX, нечёткое сопоставление со сценарием |
 | `services/auth` | **работает**: регистрация, вход, JWT RS256 + refresh, JWKS |
 | `services/project-api` | **работает**: проекты, загрузка по presigned URL (multipart, докачка), сцены, SignalR `/hubs/projects` |
-| `services/aggregator` | **работает**: `scenes.detected` → PostgreSQL → `project.status-changed` |
-| `services/transcription`, `script-parser`, `shot-type`, `scene-description`, `export` | Python, заглушки (README с контрактом) |
+| `services/aggregator` | **работает**: сцены в PostgreSQL, join с диалогами, нарезка реплик по сценам; тесты — `services/aggregator-tests` |
+| `services/shot-type`, `scene-description`, `export` | Python, заглушки (README с контрактом) |
 | `client/` | **работает**: Flutter Desktop, вход, проекты, загрузка видео, планы ([README](client/README.md)) |
 | `tools/` | тестовый ролик и сквозная проверка без клиента |
 
@@ -36,8 +40,23 @@ make up                              # всё окружение
 make dev-install                     # зависимости для тестов и tools/ (лучше в venv)
 make e2e                             # как клиент через Kong: вход → загрузка → SignalR → планы
 make e2e-kafka                       # то же без API: прямо в Kafka и MinIO
+make e2e-dialogues                   # видео + сценарий → script.parsed → dialogue.aligned → scene.ready-for-enrichment
 make test                            # контрактные и unit-тесты
 ```
+
+**LLM для Script Parser.** По умолчанию сервис ходит в Ollama на хосте
+(`http://host.docker.internal:11434/v1`, модель `qwen2.5:7b-instruct`): установите Ollama и
+выполните `ollama pull qwen2.5:7b-instruct`. Либо поднимите Ollama в compose:
+`docker compose -f deploy/docker-compose.yml --profile llm up -d` с `LLM_BASE_URL=http://ollama:11434/v1`
+в `deploy/.env`. Без LLM — `SP_MODE=rules` (эвристики). Внешний API — тот же `LLM_BASE_URL`,
+`LLM_MODEL`, `LLM_API_KEY`.
+
+**Распознавание речи.** По умолчанию CPU-образ с faster-whisper, модель `small` скачивается
+при первом ролике в том `whisper-models`. С GPU: `TA_EXTRAS=whisperx TA_BACKEND=whisperx TA_MODEL=large-v3`.
+
+**Миграции** применяются только к пустому тому PostgreSQL. Если окружение уже поднималось
+на этапе 0: `make down && docker volume rm cutsheet_pg-data && make up` (данные БД удалятся)
+или примените `db/migrations/0002_*.sql` вручную через `psql`.
 
 | Адрес | Что |
 |---|---|

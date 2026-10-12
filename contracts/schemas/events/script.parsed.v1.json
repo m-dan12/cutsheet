@@ -77,10 +77,39 @@
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Канонические имена ролей в порядке первого появления"
         },
         "prompt_version": {
-          "type": "string"
+          "type": "string",
+          "description": "Версия промпта LLM или эвристик, которыми размечен сценарий"
+        },
+        "role_aliases": {
+          "type": "object",
+          "description": "Варианты написания: канон → как встречалось в тексте (FR-SP3)",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "parser": {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "enum": [
+                "llm",
+                "rules"
+              ]
+            },
+            "model": {
+              "type": "string"
+            }
+          }
         }
       }
     }

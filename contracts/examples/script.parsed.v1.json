@@ -12,13 +12,13 @@
         "heading": "1. ИНТ. КВАРТИРА — НОЧЬ",
         "lines": [
           {
-            "line_id": "s1-l1",
+            "line_id": "p00001",
             "role": null,
             "text": "Иван входит в комнату.",
             "kind": "action"
           },
           {
-            "line_id": "s1-l2",
+            "line_id": "p00003",
             "role": "ИВАН",
             "text": "Где ты был?",
             "kind": "dialogue"
@@ -30,6 +30,15 @@
       "ИВАН",
       "МАРИЯ"
     ],
-    "prompt_version": "script-parser/v1"
+    "prompt_version": "script-labels-v1",
+    "role_aliases": {
+      "ИВАН": [
+        "Иван (за кадром)"
+      ]
+    },
+    "parser": {
+      "mode": "llm",
+      "model": "qwen2.5:7b-instruct"
+    }
   }
 }

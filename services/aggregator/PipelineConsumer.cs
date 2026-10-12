@@ -1,15 +1,17 @@
 using System.Text.Json;
+using Cutsheet.Aggregator.Dialogue;
 using Cutsheet.Messaging;
 using Npgsql;
 
 namespace Cutsheet.Aggregator;
 
-public sealed class PipelineConsumer(EventBus bus, NpgsqlDataSource db, ILogger<PipelineConsumer> logger)
+public sealed class PipelineConsumer(EventBus bus, NpgsqlDataSource db, DialogueJoin join,
+    ILogger<PipelineConsumer> logger)
     : EventConsumer(bus, logger)
 {
     private const string Consumer = "aggregator";
 
-    protected override string[] Topics => ["scenes.detected", "pipeline.failed"];
+    protected override string[] Topics => ["scenes.detected", "dialogue.aligned", "pipeline.failed"];
     protected override string GroupId => Consumer;
 
     protected override async Task HandleAsync(Envelope e, CancellationToken ct)
@@ -18,10 +20,18 @@ public sealed class PipelineConsumer(EventBus bus, NpgsqlDataSource db, ILogger<
         {
             case "scenes.detected":
                 var count = await SaveScenes(e, ct);
-                if (count is null) return; // дубль
-                Log.LogInformation("scenes.detected: {Count} scenes for project {ProjectId}", count, e.ProjectId);
-                await Bus.PublishAsync("project.status-changed", e.ProjectId, e.CorrelationId,
-                    new { stage = "scenes", status = "done", progress = 1.0 }, ct);
+                if (count is not null)
+                {
+                    Log.LogInformation("scenes.detected: {Count} scenes for project {ProjectId}", count, e.ProjectId);
+                    await Bus.PublishAsync("project.status-changed", e.ProjectId, e.CorrelationId,
+                        new { stage = "scenes", status = "done", progress = 1.0 }, ct);
+                }
+                // Join после записи сцен; у join своя дедупликация, поэтому он идёт и для дубля
+                // (на случай падения между записью сцен и join).
+                await join.OnScenesDetectedAsync(e, ct);
+                break;
+            case "dialogue.aligned":
+                await join.OnDialogueAlignedAsync(e, ct);
                 break;
             case "pipeline.failed":
                 var error = e.Payload.GetProperty("error").GetString();

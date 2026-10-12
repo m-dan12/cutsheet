@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "script-parser"
+version = "0.1.0"
+description = "Script Parser: сценарий .docx → сцены, реплики по ролям, ремарки (через LLM)"
+requires-python = ">=3.11"
+dependencies = [
+  "cutsheet-common",
+  "llm-client",
+  "python-docx>=1.1,<2",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+script-parser = "script_parser.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
