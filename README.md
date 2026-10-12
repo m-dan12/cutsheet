@@ -4,10 +4,11 @@
 система собирает черновик листа (сцены, таймкоды, план, описание, реплики по ролям),
 человек проверяет его в клиенте и выгружает в Excel / Word / PDF.
 
-Техническое задание: ТЗ v0.2 (в материалах проекта). Готово: **этап 0** (окружение одной
-командой, события по Kafka, Scene Detection) и **этап 2** (диалоги): Script Parser размечает
-сценарий через LLM, Transcription & Alignment распознаёт речь и сопоставляет её со сценарием,
-Aggregator режет реплики по сценам и публикует `scene.ready-for-enrichment`.
+Техническое задание: ТЗ v0.2 (в материалах проекта). Готовы **этап 1** (видеоветка):
+пользователь входит в клиенте, создаёт проект, загружает видео прямо в MinIO и в реальном
+времени видит найденные планы, и **этап 2** (диалоги): Script Parser размечает сценарий через
+LLM, Transcription & Alignment распознаёт речь и сопоставляет её со сценарием, Aggregator
+режет реплики по сценам и публикует `scene.ready-for-enrichment`.
 
 ## Структура
 
@@ -18,13 +19,15 @@ Aggregator режет реплики по сценам и публикует `sc
 | `db/migrations/` | SQL-миграции PostgreSQL (схема из ТЗ 6.1) |
 | `libs/python/cutsheet-common` | общий код Python-сервисов: конверт, проверка контрактов, адаптер Kafka, S3, логи |
 | `libs/python/llm-client` | общий слой LLM: OpenAI-совместимый API (Ollama / vLLM / внешний), JSON по схеме с повтором |
+| `libs/dotnet/Cutsheet.Messaging` | общий код C#-сервисов: конверт, адаптер Kafka, цикл потребителя, дедупликация |
 | `services/scene-detection` | **работает**: PySceneDetect, ключевые кадры в S3 |
 | `services/script-parser` | **работает**: `.docx` → сцены, роли, реплики (LLM или эвристики) |
 | `services/transcription` | **работает**: faster-whisper / WhisperX, нечёткое сопоставление со сценарием |
-| `services/aggregator` | C#: join сцен и диалогов в PostgreSQL, нарезка реплик по сценам; тесты — `services/aggregator-tests` |
-| `services/auth`, `project-api` | C# (.NET 10): каркасы с healthcheck |
+| `services/auth` | **работает**: регистрация, вход, JWT RS256 + refresh, JWKS |
+| `services/project-api` | **работает**: проекты, загрузка по presigned URL (multipart, докачка), сцены, SignalR `/hubs/projects` |
+| `services/aggregator` | **работает**: сцены в PostgreSQL, join с диалогами, нарезка реплик по сценам; тесты — `services/aggregator-tests` |
 | `services/shot-type`, `scene-description`, `export` | Python, заглушки (README с контрактом) |
-| `client/` | Flutter Desktop (заглушка, этап 1) |
+| `client/` | **работает**: Flutter Desktop, вход, проекты, загрузка видео, планы ([README](client/README.md)) |
 | `tools/` | тестовый ролик и сквозная проверка без клиента |
 
 ## Быстрый старт
@@ -35,8 +38,9 @@ Aggregator режет реплики по сценам и публикует `sc
 cp deploy/.env.example deploy/.env   # по желанию: свои пароли
 make up                              # всё окружение
 make dev-install                     # зависимости для тестов и tools/ (лучше в venv)
-make e2e                             # ролик → video.uploaded → scenes.detected → project.status-changed
-make e2e-dialogues                   # + сценарий → script.parsed → dialogue.aligned → scene.ready-for-enrichment
+make e2e                             # как клиент через Kong: вход → загрузка → SignalR → планы
+make e2e-kafka                       # то же без API: прямо в Kafka и MinIO
+make e2e-dialogues                   # видео + сценарий → script.parsed → dialogue.aligned → scene.ready-for-enrichment
 make test                            # контрактные и unit-тесты
 ```
 
@@ -56,11 +60,23 @@ make test                            # контрактные и unit-тесты
 
 | Адрес | Что |
 |---|---|
-| http://localhost:8000/api/v1/health | Project API через Kong |
+| http://localhost:8000/api/v1/health | Project API через Kong (без токена) |
+| http://localhost:8000/api/v1/openapi.json | OpenAPI Project API |
 | http://localhost:8000/api/v1/auth/.well-known/jwks.json | Auth Service через Kong |
 | http://localhost:9001 | консоль MinIO (`cutsheet` / `cutsheet-secret`) |
 | `localhost:9094` | Kafka для хоста; внутри сети compose — `kafka:9092` |
 | `localhost:5432` | PostgreSQL (`cutsheet` / `cutsheet`) |
+
+Миграции БД применяются только к пустому тому PostgreSQL. После обновления с этапа 0:
+`docker compose -f deploy/docker-compose.yml down -v`, затем `make up`.
+
+## Вход и JWT
+
+Auth Service при первом старте создаёт RSA-ключ в томе `auth-keys`. Плагин `jwt`
+open-source Kong не умеет читать JWKS, поэтому `deploy/kong/start.sh` при старте Kong
+подставляет публичный ключ из того же тома в consumer `cutsheet-users` (`iss` токена =
+`key` секрета). Project API проверяет подпись ещё раз тем же ключом и берёт `owner_id` из `sub`.
+SignalR по WebSocket передаёт токен в `?access_token=`, его понимают и Kong, и Project API.
 
 ## Как устроен сервис
 

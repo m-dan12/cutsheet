@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Cutsheet.Messaging;
 using Npgsql;
 using NpgsqlTypes;
 
@@ -17,6 +18,7 @@ namespace Cutsheet.Aggregator.Dialogue;
 public sealed class DialogueJoin(NpgsqlDataSource db, IEventPublisher bus, ILogger<DialogueJoin> log)
 {
     private const string Consumer = "aggregator.dialogue-join";
+    private const string Producer = "aggregator";
 
     public Task OnScenesDetectedAsync(Envelope e, CancellationToken ct) => AcceptAsync(e, "scenes", ct);
 
@@ -62,7 +64,7 @@ public sealed class DialogueJoin(NpgsqlDataSource db, IEventPublisher bus, ILogg
             var replicas = e.Payload.GetProperty("replicas").GetArrayLength();
             log.LogInformation("dialogue.aligned: {Count} replicas for project {ProjectId}", replicas, p);
             output.Add(Envelope.Create("project.status-changed", p, e.CorrelationId,
-                new { stage = "dialogue", status = "done", progress = 1.0 },
+                new { stage = "dialogue", status = "done", progress = 1.0 }, Producer,
                 DeterministicGuid.Create($"{e.EventId}:status")));
         }
         output.AddRange(await TryJoinAsync(conn, e, ct));
@@ -87,7 +89,8 @@ public sealed class DialogueJoin(NpgsqlDataSource db, IEventPublisher bus, ILogg
             return [];
         }
 
-        await EnsureScenesAsync(conn, p, scenesIn.Payload, ct);
+        // Сцены пишет PipelineConsumer до вызова join (этап 1); при повторной детекции они
+        // пересоздаются, и join режет реплики заново по сохранённому dialogue.aligned.
         var scenes = await LoadScenesAsync(conn, p, ct);
         var replicas = dialogueIn.Payload.GetProperty("replicas").EnumerateArray().Select(ParseReplica).ToList();
         var sliced = ReplicaSlicer.Slice(scenes.Select(s => s.Span).ToList(), replicas);
@@ -116,36 +119,14 @@ public sealed class DialogueJoin(NpgsqlDataSource db, IEventPublisher bus, ILogg
                 start_ms = rep.StartMs, end_ms = rep.EndMs, role = rep.Role, text = rep.Text,
                 script_line_id = rep.ScriptLineId,
             }),
-        }, DeterministicGuid.Create($"{key}:scene:{s.Span.Index}"))).ToList();
+        }, Producer, DeterministicGuid.Create($"{key}:scene:{s.Span.Index}"))).ToList();
         output.Add(Envelope.Create("project.status-changed", p, trigger.CorrelationId,
-            new { stage = "enrichment", status = "running", progress = 0.0 },
+            new { stage = "enrichment", status = "running", progress = 0.0 }, Producer,
             DeterministicGuid.Create($"{key}:status")));
         return output;
     }
 
     private sealed record SceneRow(Guid Id, SceneSpan Span, List<string> Keyframes);
-
-    /// <summary>Сцены пишет обработчик scenes.detected (этап 1); если их ещё нет — создаём из входа join.</summary>
-    private async Task EnsureScenesAsync(NpgsqlConnection conn, Guid p, JsonElement payload, CancellationToken ct)
-    {
-        if (await ScalarAsync<long>(conn, "SELECT count(*) FROM scenes WHERE project_id = @p", ct, ("p", p)) > 0) return;
-        await ExecAsync(conn, "UPDATE projects SET fps = @fps, duration_ms = @d WHERE id = @p", ct, ("p", p),
-            ("fps", payload.GetProperty("fps").GetDouble()), ("d", payload.GetProperty("duration_ms").GetInt64()));
-        foreach (var s in payload.GetProperty("scenes").EnumerateArray())
-        {
-            var idx = s.GetProperty("index").GetInt32();
-            var id = DeterministicGuid.Create($"{p}:scene:{idx}");
-            await ExecAsync(conn, """
-                INSERT INTO scenes (id, project_id, idx, start_ms, end_ms) VALUES (@id, @p, @idx, @s, @e)
-                ON CONFLICT (project_id, idx) DO NOTHING
-                """, ct, ("id", id), ("p", p), ("idx", idx),
-                ("s", s.GetProperty("start_ms").GetInt64()), ("e", s.GetProperty("end_ms").GetInt64()));
-            var pos = 0;
-            foreach (var uri in s.GetProperty("keyframe_uris").EnumerateArray())
-                await ExecAsync(conn, "INSERT INTO scene_keyframes (scene_id, position, s3_uri) VALUES (@id, @pos, @u) ON CONFLICT DO NOTHING",
-                    ct, ("id", id), ("pos", pos++), ("u", uri.GetString()!));
-        }
-    }
 
     private static async Task<List<SceneRow>> LoadScenesAsync(NpgsqlConnection conn, Guid p, CancellationToken ct)
     {

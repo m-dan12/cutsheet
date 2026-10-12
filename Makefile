@@ -1,7 +1,7 @@
 COMPOSE = docker compose -f deploy/docker-compose.yml
 PY ?= python3
 
-.PHONY: up down logs ps dev-install test test-contracts test-python test-dotnet sample sample-script e2e e2e-dialogues
+.PHONY: up down logs ps dev-install test test-contracts test-python test-dotnet sample sample-script e2e e2e-kafka e2e-dialogues
 
 up:            ## поднять всё окружение
 	$(COMPOSE) up -d --build
@@ -17,7 +17,7 @@ ps:
 
 dev-install:   ## зависимости для тестов и tools/ на хосте
 	$(PY) -m pip install -e libs/python/cutsheet-common -e "libs/python/llm-client[test]" \
-		-e "services/scene-detection[test]" -e "services/script-parser[test]" -e "services/transcription[test]" pytest
+		-e "services/scene-detection[test]" -e "services/script-parser[test]" -e "services/transcription[test]" pytest websockets
 	$(PY) -m pip install --no-deps scenedetect==0.7.2
 
 test: test-contracts test-python
@@ -39,7 +39,10 @@ sample:        ## тестовый ролик 9 с с тремя склейка�
 sample-script: ## тестовый сценарий .docx
 	$(PY) tools/make_sample_script.py tools/sample_script.docx
 
-e2e: sample    ## видео → video.uploaded → scenes.detected → project.status-changed
+e2e: sample    ## через Kong, как клиент: вход → проект → загрузка в MinIO → SignalR → сцены
+	$(PY) tools/e2e_api.py tools/sample.mp4
+
+e2e-kafka: sample  ## без API: видео → video.uploaded → scenes.detected → project.status-changed
 	$(PY) tools/dev_pipeline.py tools/sample.mp4
 
 e2e-dialogues: sample sample-script  ## видео + сценарий → script.parsed, dialogue.aligned, scene.ready-for-enrichment

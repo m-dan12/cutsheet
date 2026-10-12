@@ -48,6 +48,19 @@ jobs:
       - run: for f in db/migrations/*.sql; do psql -v ON_ERROR_STOP=1 -h localhost -U cutsheet -d cutsheet -f "$f"; done
       - run: dotnet test services/aggregator-tests
 
+  client:
+    name: Flutter client
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: client }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
   e2e:
     name: docker-compose end to end
     runs-on: ubuntu-latest
@@ -61,8 +74,8 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: make dev-install
       - run: docker compose -f deploy/docker-compose.yml up -d --build --wait
-      # --wait ждёт только старта контейнеров; Project API начинает слушать порт чуть позже.
-      - run: curl -fsS --retry 30 --retry-delay 2 --retry-all-errors http://localhost:8000/api/v1/health
+      # У C#-сервисов нет healthcheck (в образе aspnet нет curl): ждём, пока Project API ответит через Kong.
+      - run: curl -fsS --retry 30 --retry-all-errors --retry-delay 2 http://localhost:8000/api/v1/health
       - run: make e2e
       - run: make e2e-dialogues
       - if: failure()

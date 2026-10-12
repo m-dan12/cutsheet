@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Cutsheet.Aggregator.Dialogue;
+using Cutsheet.Messaging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Xunit;
@@ -46,17 +47,6 @@ public sealed class DialogueJoinTests : IAsyncLifetime
         new(Guid.NewGuid(), type, 1, project ?? _project, Guid.NewGuid(), DateTimeOffset.UtcNow,
             JsonSerializer.SerializeToElement(payload), "test");
 
-    private static object ScenesPayload => new
-    {
-        fps = 25.0, duration_ms = 9000,
-        scenes = new object[]
-        {
-            new { index = 0, start_ms = 0, end_ms = 2000, keyframe_uris = new[] { "s3://cutsheet/f/0_0.jpg" } },
-            new { index = 1, start_ms = 2000, end_ms = 5000, keyframe_uris = new[] { "s3://cutsheet/f/1_0.jpg" } },
-            new { index = 2, start_ms = 5000, end_ms = 9000, keyframe_uris = Array.Empty<string>() },
-        },
-    };
-
     private static object DialoguePayload(string firstText = "Привет") => new
     {
         replicas = new object[]
@@ -67,6 +57,36 @@ public sealed class DialogueJoinTests : IAsyncLifetime
         },
         language = "ru",
     };
+
+    /// <summary>Как PipelineConsumer на scenes.detected: сцены проекта пересоздаются целиком.</summary>
+    private async Task<Envelope> ScenesDetectedAsync(long[] bounds)
+    {
+        var scenes = bounds.Zip(bounds.Skip(1), (a, b) => (a, b)).Select((s, i) => new
+        {
+            index = i, start_ms = s.a, end_ms = s.b, keyframe_uris = new[] { $"s3://cutsheet/f/{i}_0.jpg" },
+        }).ToArray();
+        await using (var del = _db.CreateCommand("DELETE FROM scenes WHERE project_id = $1"))
+        {
+            del.Parameters.AddWithValue(_project);
+            await del.ExecuteNonQueryAsync();
+        }
+        foreach (var sc in scenes)
+        {
+            var id = Guid.NewGuid();
+            await using var ins = _db.CreateCommand("INSERT INTO scenes (id, project_id, idx, start_ms, end_ms) VALUES ($1, $2, $3, $4, $5)");
+            ins.Parameters.AddWithValue(id);
+            ins.Parameters.AddWithValue(_project);
+            ins.Parameters.AddWithValue(sc.index);
+            ins.Parameters.AddWithValue(sc.start_ms);
+            ins.Parameters.AddWithValue(sc.end_ms);
+            await ins.ExecuteNonQueryAsync();
+            await using var kf = _db.CreateCommand("INSERT INTO scene_keyframes (scene_id, position, s3_uri) VALUES ($1, 0, $2)");
+            kf.Parameters.AddWithValue(id);
+            kf.Parameters.AddWithValue(sc.keyframe_uris[0]);
+            await kf.ExecuteNonQueryAsync();
+        }
+        return Event("scenes.detected", new { fps = 25.0, duration_ms = bounds[^1], scenes });
+    }
 
     private async Task<List<(int Scene, string Text, string? Role, bool Matched)>> ReplicasAsync()
     {
@@ -88,12 +108,11 @@ public sealed class DialogueJoinTests : IAsyncLifetime
         await _join.OnDialogueAlignedAsync(dialogue, default);
         Assert.Equal(["project.status-changed"], _bus.Events.Select(e => e.EventType));  // ждём сцены
 
-        await _join.OnScenesDetectedAsync(Event("scenes.detected", ScenesPayload), default);
+        await _join.OnScenesDetectedAsync(await ScenesDetectedAsync([0, 2000, 5000, 9000]), default);
         var ready = _bus.Events.Where(e => e.EventType == "scene.ready-for-enrichment").ToList();
         Assert.Equal(3, ready.Count);
         Assert.Equal("Здравствуй", ready[1].Payload.GetProperty("replicas")[0].GetProperty("text").GetString());
         Assert.Equal("s3://cutsheet/f/1_0.jpg", ready[1].Payload.GetProperty("keyframe_uris")[0].GetString());
-        Assert.Equal(DeterministicGuid.Create($"{_project}:scene:1"), ready[1].Payload.GetProperty("scene_id").GetGuid());
         Assert.Equal([(0, "Привет", "ИВАН", true), (1, "Здравствуй", "МАША", true), (2, "ну и погода", null, false)],
             await ReplicasAsync());
 
@@ -107,7 +126,7 @@ public sealed class DialogueJoinTests : IAsyncLifetime
     [PostgresFact]
     public async Task ReprocessingKeepsUserEditedReplicas()
     {
-        await _join.OnScenesDetectedAsync(Event("scenes.detected", ScenesPayload), default);
+        await _join.OnScenesDetectedAsync(await ScenesDetectedAsync([0, 2000, 5000, 9000]), default);
         await _join.OnDialogueAlignedAsync(Event("dialogue.aligned", DialoguePayload()), default);
         foreach (var sql in new[]
                  {
@@ -132,6 +151,18 @@ public sealed class DialogueJoinTests : IAsyncLifetime
         Assert.Equal(3, rows.Count);
         Assert.Contains((0, "Привет!!", "ИВАН", true), rows);
         Assert.DoesNotContain(rows, r => r.Text == "Приветик");
+    }
+
+    [PostgresFact]
+    public async Task RedetectedScenesAreSlicedAgain()
+    {
+        await _join.OnDialogueAlignedAsync(Event("dialogue.aligned", DialoguePayload()), default);
+        await _join.OnScenesDetectedAsync(await ScenesDetectedAsync([0, 2000, 5000, 9000]), default);
+        // Повторная детекция: две сцены вместо трёх, старые сцены и реплики удалены каскадом.
+        await _join.OnScenesDetectedAsync(await ScenesDetectedAsync([0, 5000, 9000]), default);
+        Assert.Equal([(0, "Привет", "ИВАН", true), (0, "Здравствуй", "МАША", true), (1, "ну и погода", null, false)],
+            await ReplicasAsync());
+        Assert.Equal(5, _bus.Events.Count(e => e.EventType == "scene.ready-for-enrichment"));
     }
 
     [PostgresFact]
