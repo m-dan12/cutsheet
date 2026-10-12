@@ -3,8 +3,14 @@ using Confluent.Kafka;
 
 namespace Cutsheet.Aggregator;
 
+/// <summary>Публикация событий: бизнес-логика зависит от этого интерфейса, а не от Kafka.</summary>
+public interface IEventPublisher
+{
+    Task PublishAsync(Envelope e, CancellationToken ct);
+}
+
 /// <summary>Тонкий адаптер брокера (ТЗ 3.3): бизнес-логика не видит Kafka напрямую.</summary>
-public sealed class EventBus : IDisposable
+public sealed class EventBus : IEventPublisher, IDisposable
 {
     private readonly IProducer<string, string> _producer;
 

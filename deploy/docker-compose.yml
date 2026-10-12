@@ -11,6 +11,15 @@ x-python-env: &python-env
   S3_BUCKET: ${S3_BUCKET:-cutsheet}
   LOG_LEVEL: INFO
 
+# Общий слой LLM (ТЗ 5.10): по умолчанию Ollama на хосте (Docker Desktop / WSL).
+# Внутри compose: docker compose --profile llm up, LLM_BASE_URL=http://ollama:11434/v1.
+x-llm-env: &llm-env
+  LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+  LLM_MODEL: ${LLM_MODEL:-qwen2.5:7b-instruct}
+  LLM_API_KEY: ${LLM_API_KEY:-ollama}
+  LLM_STRUCTURED: ${LLM_STRUCTURED:-json_schema}
+  LLM_MAX_CONCURRENCY: ${LLM_MAX_CONCURRENCY:-1}
+
 x-dotnet-env: &dotnet-env
   ASPNETCORE_URLS: http://+:8080
   Kafka__BootstrapServers: kafka:9092
@@ -131,6 +140,49 @@ services:
       minio-init: { condition: service_completed_successfully }
     restart: unless-stopped
 
+  script-parser:
+    build: { context: .., dockerfile: services/script-parser/Dockerfile }
+    image: cutsheet/script-parser:dev
+    environment:
+      <<: [*python-env, *llm-env]
+      KAFKA_GROUP_ID: script-parser
+      SP_MODE: ${SP_MODE:-llm}            # rules — эвристики без LLM
+      SP_CHUNK_CHARS: ${SP_CHUNK_CHARS:-6000}
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      minio-init: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  transcription:
+    build:
+      context: ..
+      dockerfile: services/transcription/Dockerfile
+      args: { TA_EXTRAS: "${TA_EXTRAS:-whisper}" }   # whisperx — GPU-образ
+    image: cutsheet/transcription:dev
+    environment:
+      <<: *python-env
+      KAFKA_GROUP_ID: transcription
+      TA_BACKEND: ${TA_BACKEND:-faster-whisper}
+      TA_MODEL: ${TA_MODEL:-small}
+      TA_DEVICE: ${TA_DEVICE:-auto}
+      TA_COMPUTE_TYPE: ${TA_COMPUTE_TYPE:-default}
+      TA_LANGUAGE: ${TA_LANGUAGE-ru}
+    volumes: [whisper-models:/models]   # модели Whisper скачиваются при первом запуске
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      minio-init: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  # Локальная LLM для Script Parser (и Scene Description на этапе 3): docker compose --profile llm up
+  # После старта: docker compose exec ollama ollama pull qwen2.5:7b-instruct
+  ollama:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    profiles: [llm]
+    ports: ["11434:11434"]
+    volumes: [ollama-models:/root/.ollama]
+    restart: unless-stopped
+
   auth:
     build: { context: .., dockerfile: services/auth/Dockerfile }
     image: cutsheet/auth:dev
@@ -161,3 +213,5 @@ volumes:
   kafka-data:
   pg-data:
   minio-data:
+  whisper-models:
+  ollama-models:

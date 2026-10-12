@@ -57,3 +57,17 @@ class Storage:
         kwargs = {"ContentType": content_type} if content_type else {}
         self.client.put_object(Bucket=bucket, Key=key, Body=data, **kwargs)
         return s3_uri(bucket, key)
+
+    def get_bytes(self, uri: str) -> bytes:
+        bucket, key = parse_s3_uri(uri)
+        return self.client.get_object(Bucket=bucket, Key=key)["Body"].read()
+
+    def exists(self, uri: str) -> bool:
+        bucket, key = parse_s3_uri(uri)
+        try:
+            self.client.head_object(Bucket=bucket, Key=key)
+            return True
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+                return False
+            raise

@@ -1,11 +1,12 @@
 using System.Text.Json;
 using Confluent.Kafka;
+using Cutsheet.Aggregator.Dialogue;
 
 namespace Cutsheet.Aggregator;
 
-public sealed class PipelineConsumer(EventBus bus, ILogger<PipelineConsumer> log) : BackgroundService
+public sealed class PipelineConsumer(EventBus bus, DialogueJoin join, ILogger<PipelineConsumer> log) : BackgroundService
 {
-    private static readonly string[] Topics = ["scenes.detected", "pipeline.failed"];
+    private static readonly string[] Topics = ["scenes.detected", "dialogue.aligned", "pipeline.failed"];
 
     protected override Task ExecuteAsync(CancellationToken ct) => Task.Run(() => Loop(ct), ct);
 
@@ -54,6 +55,10 @@ public sealed class PipelineConsumer(EventBus bus, ILogger<PipelineConsumer> log
                 log.LogInformation("scenes.detected: {Count} scenes for project {ProjectId}", count, e.ProjectId);
                 await bus.PublishAsync(Envelope.Create("project.status-changed", e.ProjectId, e.CorrelationId,
                     new { stage = "scenes", status = "done", progress = 1.0 }), ct);
+                await join.OnScenesDetectedAsync(e, ct);
+                break;
+            case "dialogue.aligned":
+                await join.OnDialogueAlignedAsync(e, ct);
                 break;
             case "pipeline.failed":
                 var error = e.Payload.GetProperty("error").GetString();

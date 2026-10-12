@@ -35,8 +35,9 @@ class KafkaBus:
         # иначе брокер решит, что консьюмер умер, и отдаст партицию другому.
         self.max_poll_interval_ms = max_poll_interval_ms or int(
             os.environ.get("KAFKA_MAX_POLL_INTERVAL_MS", str(2 * 60 * 60 * 1000)))
+        # Сжатие: сценарий целиком в script.parsed — сотни КБ текста, а лимит сообщения 1 МБ.
         self._producer = Producer({"bootstrap.servers": self.bootstrap, "enable.idempotence": True,
-                                   "client.id": service})
+                                   "compression.type": "lz4", "client.id": service})
         self._running = True
 
     def publish(self, event: Event) -> None:
