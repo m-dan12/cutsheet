@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "export_id": "1e2d3c4b-5a69-4788-9a0b-c1d2e3f4a5b6",
+  "project": { "id": "3f2b8c1e-5d4a-4e6b-9c7d-1a2b3c4d5e6f", "name": "Короткий метр", "language": "ru" },
+  "generated_at": "2026-10-12T10:00:00Z",
+  "fps": 25.0,
+  "duration_ms": 7400,
+  "scenes": [
+    { "id": "5b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e", "number": 1, "start_ms": 0, "end_ms": 2000, "shot_type": "wide",
+      "description": "Улица, утро. Иван выходит из подъезда.", "replicas": [] },
+    { "id": "6c2d3e4f-5a6b-4c7d-9e8f-0a1b2c3d4e5f", "number": 2, "start_ms": 2000, "end_ms": 5400, "shot_type": "close",
+      "description": "Иван смотрит на небо.",
+      "replicas": [
+        { "role": "ИВАН", "text": "Ну и погода.", "start_ms": 2100, "end_ms": 2900 },
+        { "role": null, "text": "(за кадром) Опаздываешь!", "start_ms": 4000, "end_ms": 4800 }
+      ] },
+    { "number": 3, "start_ms": 5400, "end_ms": 7400, "shot_type": null, "description": null, "replicas": [] }
+  ]
+}

@@ -180,6 +180,19 @@ services:
       minio-init: { condition: service_completed_successfully }
     restart: unless-stopped
 
+  export:
+    build: { context: .., dockerfile: services/export/Dockerfile }
+    image: cutsheet/export:dev
+    environment:
+      <<: *python-env
+      KAFKA_GROUP_ID: export
+    # Свои шаблоны оформления (FR-E7): <имя>.json, без пересборки образа.
+    volumes: [./export-templates:/templates:ro]
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      minio-init: { condition: service_completed_successfully }
+    restart: unless-stopped
+
   # Локальная LLM для Script Parser (и Scene Description на этапе 3): docker compose --profile llm up
   # После старта: docker compose exec ollama ollama pull qwen2.5:7b-instruct
   ollama:

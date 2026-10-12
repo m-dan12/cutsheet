@@ -1,0 +1,32 @@
+{
+  "title": "Монтажный лист",
+  "header": [
+    "Проект: {project}",
+    "Дата: {date}",
+    "Сцен: {scenes}",
+    "Длительность: {duration}"
+  ],
+  "footer": "{project} · монтажный лист · стр. {page}",
+  "date_format": "%d.%m.%Y",
+  "timecode": "frames",
+  "columns": [
+    { "key": "number", "title": "№", "width": 5 },
+    { "key": "start", "title": "Начало", "width": 12 },
+    { "key": "end", "title": "Конец", "width": 12 },
+    { "key": "shot", "title": "План", "width": 10 },
+    { "key": "description", "title": "Описание", "width": 45 },
+    { "key": "dialogue", "title": "Диалоги", "width": 55 }
+  ],
+  "shot_labels": {
+    "wide": "общий",
+    "medium": "средний",
+    "close": "крупный",
+    "detail": "деталь",
+    "unknown": ""
+  },
+  "unknown_role": null,
+  "font": { "name": "DejaVu Sans", "size": 9, "title_size": 14 },
+  "pdf_fonts": { "regular": "DejaVuSans.ttf", "bold": "DejaVuSans-Bold.ttf" },
+  "page": { "size": "A4", "orientation": "landscape", "margin_mm": 12 },
+  "header_fill": "D9E2F3"
+}

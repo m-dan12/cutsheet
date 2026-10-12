@@ -112,6 +112,29 @@ class Api extends ChangeNotifier {
   Future<Project> reprocess(String projectId, String from) async => Project.fromJson(
       await _json('POST', '/projects/$projectId/reprocess', {'from': from}) as Map<String, dynamic>);
 
+  // ---------- экспорт (этап 5) ----------
+
+  /// Запрос экспорта: сервер снимает лист с правками и ставит задачу; статус придёт в хаб "export".
+  Future<ExportJob> requestExport(String projectId, String format, {Map<String, Object?>? options}) async =>
+      ExportJob.fromJson(await _json('POST', '/projects/$projectId/exports', {
+        'format': format,
+        'options': ?options,
+      }) as Map<String, dynamic>);
+
+  Future<List<ExportJob>> exports(String projectId) async => (await _json('GET', '/projects/$projectId/exports') as List)
+      .map((e) => ExportJob.fromJson(e as Map<String, dynamic>))
+      .toList();
+
+  Future<ExportJob> exportJob(String projectId, String exportId) async =>
+      ExportJob.fromJson(await _json('GET', '/projects/$projectId/exports/$exportId') as Map<String, dynamic>);
+
+  /// Файл по presigned URL прямо из S3 (без токена: подпись уже в ссылке).
+  Future<Uint8List> download(String url) async {
+    final resp = await _http.get(Uri.parse(url));
+    if (resp.statusCode != 200) throw ApiException(resp.statusCode, 'Не удалось скачать файл: HTTP ${resp.statusCode}');
+    return resp.bodyBytes;
+  }
+
   static List<Scene> _changes(Object? data) => ((data as Map<String, dynamic>)['scenes'] as List)
       .map((s) => Scene.fromJson(s as Map<String, dynamic>))
       .toList();

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cutsheet.local/contracts/documents/sheet-snapshot.v1.json",
+  "title": "Снимок монтажного листа v1",
+  "description": "Project API → S3 → Export Service. Итоговые значения листа с учётом правок пользователя (FR-G6, FR-E4); Export Service в PostgreSQL не ходит. Ключ: projects/{project_id}/exports/{export_id}/snapshot.json.",
+  "type": "object",
+  "required": ["schema_version", "export_id", "project", "generated_at", "duration_ms", "scenes"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "export_id": { "$ref": "../defs.v1.json#/$defs/uuid" },
+    "project": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "../defs.v1.json#/$defs/uuid" },
+        "name": { "type": "string" },
+        "language": { "type": "string" }
+      }
+    },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "fps": { "type": ["number", "null"], "exclusiveMinimum": 0, "description": "null — fps неизвестен, таймкод считается по 25 кадр/с" },
+    "duration_ms": { "anyOf": [{ "$ref": "../defs.v1.json#/$defs/ms" }, { "type": "null" }] },
+    "scenes": {
+      "type": "array",
+      "description": "Строки листа в порядке сцен",
+      "items": {
+        "type": "object",
+        "required": ["number", "start_ms", "end_ms", "shot_type", "description", "replicas"],
+        "properties": {
+          "id": { "$ref": "../defs.v1.json#/$defs/uuid" },
+          "number": { "type": "integer", "minimum": 1 },
+          "start_ms": { "$ref": "../defs.v1.json#/$defs/ms" },
+          "end_ms": { "$ref": "../defs.v1.json#/$defs/ms" },
+          "shot_type": { "anyOf": [{ "$ref": "../defs.v1.json#/$defs/shot_type" }, { "type": "null" }] },
+          "description": { "type": ["string", "null"] },
+          "replicas": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["role", "text"],
+              "properties": {
+                "role": { "type": ["string", "null"], "description": "null — неизвестный говорящий" },
+                "text": { "type": "string" },
+                "start_ms": { "$ref": "../defs.v1.json#/$defs/ms" },
+                "end_ms": { "$ref": "../defs.v1.json#/$defs/ms" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

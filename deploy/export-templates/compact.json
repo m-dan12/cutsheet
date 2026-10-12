@@ -1,0 +1,12 @@
+{
+  "title": "Монтажный лист (диалоги)",
+  "columns": [
+    { "key": "number", "title": "№", "width": 5 },
+    { "key": "start", "title": "Начало", "width": 13 },
+    { "key": "end", "title": "Конец", "width": 13 },
+    { "key": "dialogue", "title": "Диалоги", "width": 69 }
+  ],
+  "unknown_role": "ЗК",
+  "font": { "size": 10 },
+  "page": { "orientation": "portrait" }
+}

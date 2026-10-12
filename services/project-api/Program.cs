@@ -1,6 +1,7 @@
 // Project API (ТЗ 5.2). Этап 1: проекты, загрузка видео в S3 по presigned URL (multipart с докачкой),
 // публикация video.uploaded / script.uploaded, список сцен, статусы через SignalR.
 // Этап 4: монтажный лист — правки строк с row_version, split/merge, перезапуск без потери правок.
+// Этап 5: экспорт — снимок листа в S3, export.requested, итог из export.completed / export.failed.
 using System.Text.Json;
 using Cutsheet.Messaging;
 using Cutsheet.ProjectApi;
@@ -14,9 +15,11 @@ builder.Services.AddSingleton<EventBus>();
 builder.Services.AddSingleton(Postgres.CreateDataSource(config));
 builder.Services.AddSingleton<ProjectStore>();
 builder.Services.AddSingleton<SheetStore>();
+builder.Services.AddSingleton<ExportStore>();
 builder.Services.AddSingleton<ObjectStorage>();
 builder.Services.AddSingleton<JwtKeys>();
 builder.Services.AddHostedService<StatusConsumer>();
+builder.Services.AddHostedService<ExportConsumer>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer();
 builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
@@ -73,5 +76,6 @@ projects.MapPost("/{id:guid}/uploads", Endpoints.StartUpload);
 projects.MapGet("/{id:guid}/uploads/{uploadId:guid}", Endpoints.GetUpload);
 projects.MapPost("/{id:guid}/uploads/{uploadId:guid}/complete", Endpoints.CompleteUpload);
 SheetEndpoints.Map(projects);
+ExportEndpoints.Map(projects);
 
 app.Run();

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cutsheet-export"
+version = "0.1.0"
+description = "Export Service: монтажный лист в xlsx / docx / pdf из снимка листа в S3"
+requires-python = ">=3.11"
+dependencies = [
+  "cutsheet-common",
+  "openpyxl>=3.1",
+  "python-docx>=1.1",
+  "reportlab>=4.2",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pypdf>=5"]
+
+[project.scripts]
+export-service = "export_service.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+export_service = ["templates/*.json"]

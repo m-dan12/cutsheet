@@ -10,7 +10,7 @@
 LLM, Transcription & Alignment распознаёт речь и сопоставляет её со сценарием, Aggregator
 режет реплики по сценам и публикует `scene.ready-for-enrichment`, и **этап 4** (редактирование):
 лист правится в клиенте со встроенным плеером, правки защищены `row_version` и переживают
-повторную обработку.
+повторную обработку, и **этап 5** (экспорт): лист с правками выгружается в Excel, Word и PDF.
 
 ## Правки листа (этап 4)
 
@@ -32,6 +32,21 @@ LLM, Transcription & Alignment распознаёт речь и сопостав
 переходят на ближайшую. После split/merge/правки таймкодов (`projects.structure_edited`) структура
 листа принадлежит человеку, и детекция её не меняет. Проверка: `make e2e-editing`.
 
+## Экспорт (этап 5)
+
+`POST /projects/{id}/exports` `{"format": "xlsx" | "docx" | "pdf", "options": {"template": "...", "timecode": "frames" | "ms"}}`
+отвечает 202. Project API собирает снимок листа с итоговыми значениями (правки пользователя уже
+применены) в `projects/{id}/exports/{exportId}/snapshot.json` и публикует `export.requested`.
+Export Service (в БД не ходит) кладёт файл рядом (`sheet.<format>`) и отвечает
+`export.completed` / `export.failed`; Project API записывает итог в `exports` и шлёт в хаб
+сообщение `"export"`. `GET /projects/{id}/exports/{exportId}` отдаёт статус и presigned-ссылку на
+файл с именем `<проект> - монтажный лист.<format>`, `GET /projects/{id}/exports` — последние экспорты.
+
+Оформление задаётся JSON-шаблонами без пересборки (FR-E7): свои кладутся в
+`deploy/export-templates/` ([services/export](services/export/README.md)). В клиенте экспорт — кнопка
+со стрелкой вниз в заголовке проекта; доступна, как только в листе есть строки, ревью
+необязательно (FR-C12). Проверка: `make e2e-export`.
+
 ## Структура
 
 | Путь | Что там |
@@ -48,8 +63,9 @@ LLM, Transcription & Alignment распознаёт речь и сопостав
 | `services/auth` | **работает**: регистрация, вход, JWT RS256 + refresh, JWKS |
 | `services/project-api` | **работает**: проекты, загрузка по presigned URL (multipart, докачка), сцены, SignalR `/hubs/projects` |
 | `services/aggregator` | **работает**: сцены в PostgreSQL, join с диалогами, нарезка реплик по сценам; тесты — `services/aggregator-tests` |
-| `services/shot-type`, `scene-description`, `export` | Python, заглушки (README с контрактом) |
-| `client/` | **работает**: Flutter Desktop, вход, проекты, загрузка видео, планы ([README](client/README.md)) |
+| `services/export` | **работает**: монтажный лист в xlsx / docx / pdf из снимка в S3, шаблоны оформления |
+| `services/shot-type`, `scene-description` | Python, заглушки (README с контрактом) |
+| `client/` | **работает**: Flutter Desktop, вход, проекты, загрузка видео, редактор листа, экспорт ([README](client/README.md)) |
 | `tools/` | тестовый ролик и сквозная проверка без клиента |
 
 ## Быстрый старт

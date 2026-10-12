@@ -40,3 +40,24 @@ def test_payload_violations_are_caught(contracts):
     ev["payload"]["scenes"] = []
     with pytest.raises(ContractError):
         contracts.validate(ev)
+
+
+DOCUMENTS = sorted((ROOT / "examples" / "documents").glob("*.json"))
+
+
+@pytest.mark.parametrize("path", DOCUMENTS, ids=lambda p: p.name)
+def test_document_example_is_valid(contracts, path):
+    name, ver = path.name.removesuffix(".json").rsplit(".v", 1)
+    contracts.validate_document(name, int(ver), json.loads(path.read_text(encoding="utf-8")))
+
+
+def test_every_document_schema_has_example():
+    schemas = {p.name for p in (ROOT / "schemas" / "documents").glob("*.json")}
+    assert schemas == {p.name for p in DOCUMENTS}
+
+
+def test_snapshot_violations_are_caught(contracts):
+    doc = json.loads((ROOT / "examples" / "documents" / "sheet-snapshot.v1.json").read_text(encoding="utf-8"))
+    doc["scenes"][0]["shot_type"] = "huge"
+    with pytest.raises(ContractError, match="shot_type"):
+        contracts.validate_document("sheet-snapshot", 1, doc)

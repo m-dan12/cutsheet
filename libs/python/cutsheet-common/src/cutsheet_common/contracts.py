@@ -33,16 +33,23 @@ class Contracts:
         self.dir = Path(schemas_dir) if schemas_dir else _default_dir()
         resources = []
         self._by_event: dict[tuple[str, int], dict[str, Any]] = {}
+        # Документы в S3, которые передаются ссылкой из события (снимок листа для экспорта).
+        self._by_document: dict[tuple[str, int], dict[str, Any]] = {}
         for path in sorted(self.dir.rglob("*.json")):
             schema = json.loads(path.read_text(encoding="utf-8"))
             resources.append((schema["$id"], Resource.from_contents(schema)))
-            if path.parent.name == "events":
+            if path.parent.name in ("events", "documents"):
                 name, ver = path.name.removesuffix(".json").rsplit(".v", 1)
-                self._by_event[(name, int(ver))] = schema
+                target = self._by_event if path.parent.name == "events" else self._by_document
+                target[(name, int(ver))] = schema
         self._registry = Registry().with_resources(resources)
         self._validators = {
             k: Draft202012Validator(s, registry=self._registry, format_checker=FormatChecker())
             for k, s in self._by_event.items()
+        }
+        self._document_validators = {
+            k: Draft202012Validator(s, registry=self._registry, format_checker=FormatChecker())
+            for k, s in self._by_document.items()
         }
 
     @property
@@ -54,7 +61,18 @@ class Contracts:
         validator = self._validators.get(key)  # type: ignore[arg-type]
         if validator is None:
             raise ContractError(f"unknown event type/version: {key}")
-        errors = sorted(validator.iter_errors(event), key=lambda e: list(e.absolute_path))
-        if errors:
-            msg = "; ".join(f"{'/'.join(map(str, e.absolute_path)) or '<root>'}: {e.message}" for e in errors[:5])
-            raise ContractError(f"{key[0]} v{key[1]}: {msg}")
+        _check(validator, event, f"{key[0]} v{key[1]}")
+
+    def validate_document(self, name: str, version: int, doc: Any) -> None:
+        """Проверка документа из schemas/documents (например, sheet-snapshot v1)."""
+        validator = self._document_validators.get((name, version))
+        if validator is None:
+            raise ContractError(f"unknown document type/version: {(name, version)}")
+        _check(validator, doc, f"{name} v{version}")
+
+
+def _check(validator: Draft202012Validator, data: Any, what: str) -> None:
+    errors = sorted(validator.iter_errors(data), key=lambda e: list(e.absolute_path))
+    if errors:
+        msg = "; ".join(f"{'/'.join(map(str, e.absolute_path)) or '<root>'}: {e.message}" for e in errors[:5])
+        raise ContractError(f"{what}: {msg}")
