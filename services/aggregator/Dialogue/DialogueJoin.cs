@@ -1,14 +1,16 @@
 using System.Text.Json;
+using Cutsheet.Aggregator.Enrichment;
 using Cutsheet.Messaging;
 using Npgsql;
 using NpgsqlTypes;
+using static Cutsheet.Aggregator.Db;
 
 namespace Cutsheet.Aggregator.Dialogue;
 
 /// <summary>
 /// Join сцен и диалогов (FR-A1–A3). Оба входа (scenes.detected, dialogue.aligned) сохраняются
 /// в join_inputs; когда есть оба, реплики режутся по сценам, пишутся в replicas/roles и на каждую
-/// сцену публикуется scene.ready-for-enrichment.
+/// сцену публикуется scene.ready-for-enrichment; сцена ждёт обогащения (<see cref="EnrichmentCollector"/>).
 ///
 /// Всё в одной транзакции с блокировкой строки pipeline_state проекта, поэтому одновременная
 /// обработка двух входов не запускает нарезку дважды. События публикуются до фиксации транзакции
@@ -120,6 +122,9 @@ public sealed class DialogueJoin(NpgsqlDataSource db, IEventPublisher bus, ILogg
                 script_line_id = rep.ScriptLineId,
             }),
         }, Producer, DeterministicGuid.Create($"{key}:scene:{s.Span.Index}"))).ToList();
+        // Сбор обогащения (этап 3) ждёт ответы именно на эти запросы.
+        foreach (var (scene, request) in scenes.Zip(output))
+            await EnrichmentCollector.RequestAsync(conn, scene.Id, request.EventId, ct);
         output.Add(Envelope.Create("project.status-changed", p, trigger.CorrelationId,
             new { stage = "enrichment", status = "running", progress = 0.0 }, Producer,
             DeterministicGuid.Create($"{key}:status")));
@@ -226,30 +231,5 @@ public sealed class DialogueJoin(NpgsqlDataSource db, IEventPublisher bus, ILogg
             Str("script_line_id"),
             r.TryGetProperty("confidence", out var c) && c.ValueKind == JsonValueKind.Number ? c.GetDouble() : null,
             r.TryGetProperty("matched", out var m) && m.ValueKind == JsonValueKind.True);
-    }
-
-    private static NpgsqlCommand Command(NpgsqlConnection conn, string sql, params (string Name, object Value)[] args)
-    {
-        var cmd = new NpgsqlCommand(sql, conn);
-        foreach (var (name, value) in args)
-        {
-            if (value is NpgsqlParameter prm) { prm.ParameterName = name; cmd.Parameters.Add(prm); }
-            else cmd.Parameters.AddWithValue(name, value);
-        }
-        return cmd;
-    }
-
-    private static async Task<int> ExecAsync(NpgsqlConnection conn, string sql, CancellationToken ct,
-        params (string, object)[] args)
-    {
-        await using var cmd = Command(conn, sql, args);
-        return await cmd.ExecuteNonQueryAsync(ct);
-    }
-
-    private static async Task<T> ScalarAsync<T>(NpgsqlConnection conn, string sql, CancellationToken ct,
-        params (string, object)[] args)
-    {
-        await using var cmd = Command(conn, sql, args);
-        return (T)(await cmd.ExecuteScalarAsync(ct))!;
     }
 }

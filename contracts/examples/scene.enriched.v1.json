@@ -9,6 +9,9 @@
     "scene_id": "7c6d5e4f-3a2b-4c1d-9e8f-7a6b5c4d3e2f",
     "source": "shot_type",
     "shot_type": "medium",
-    "confidence": 0.74
+    "confidence": 0.74,
+    "model": "mediapipe-pose-lite",
+    "prompt_version": "shot-rules-v1",
+    "request_event_id": "00000000-0000-4000-8000-000000000005"
   }
 }
