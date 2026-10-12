@@ -1,17 +1,18 @@
 using System.Text.Json;
 using Cutsheet.Aggregator.Dialogue;
+using Cutsheet.Aggregator.Enrichment;
 using Cutsheet.Messaging;
 using Npgsql;
 
 namespace Cutsheet.Aggregator;
 
 public sealed class PipelineConsumer(EventBus bus, NpgsqlDataSource db, DialogueJoin join,
-    ILogger<PipelineConsumer> logger)
+    EnrichmentCollector enrichment, ILogger<PipelineConsumer> logger)
     : EventConsumer(bus, logger)
 {
     private const string Consumer = "aggregator";
 
-    protected override string[] Topics => ["scenes.detected", "dialogue.aligned", "pipeline.failed"];
+    protected override string[] Topics => ["scenes.detected", "dialogue.aligned", "scene.enriched", "pipeline.failed"];
     protected override string GroupId => Consumer;
 
     protected override async Task HandleAsync(Envelope e, CancellationToken ct)
@@ -32,6 +33,13 @@ public sealed class PipelineConsumer(EventBus bus, NpgsqlDataSource db, Dialogue
                 break;
             case "dialogue.aligned":
                 await join.OnDialogueAlignedAsync(e, ct);
+                break;
+            case "scene.enriched":
+                await enrichment.OnEnrichedAsync(e, ct);
+                break;
+            case "pipeline.failed" when IsEnrichmentRequest(e):
+                // Сбой обогащения одной сцены не валит проект: сцена получает enrichment_failed (FR-A6).
+                await enrichment.OnFailedAsync(e, ct);
                 break;
             case "pipeline.failed":
                 var error = e.Payload.GetProperty("error").GetString();
@@ -95,6 +103,9 @@ public sealed class PipelineConsumer(EventBus bus, NpgsqlDataSource db, Dialogue
         await tx.CommitAsync(ct);
         return true;
     }
+
+    private static bool IsEnrichmentRequest(Envelope e) =>
+        e.Payload.TryGetProperty("source_event_type", out var t) && t.GetString() == "scene.ready-for-enrichment";
 
     /// <summary>Этап пайплайна по имени упавшего сервиса.</summary>
     private static string StageOf(string service) => service switch

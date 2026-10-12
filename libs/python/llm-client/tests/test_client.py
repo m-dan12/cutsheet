@@ -2,7 +2,7 @@ import logging
 
 import pytest
 
-from llm_client import LLMError, LLMInvalidOutput, image_part
+from llm_client import LLMCircuitOpen, LLMError, LLMInvalidOutput, image_part
 from llm_client.client import parse_json
 from llm_client.config import LLMConfig
 from llm_client.testing import FakeLLMServer
@@ -83,3 +83,49 @@ def test_config_from_env(monkeypatch):
     monkeypatch.setenv("LLM_MAX_CONCURRENCY", "4")
     cfg = LLMConfig.from_env()
     assert (cfg.base_url, cfg.model, cfg.max_concurrency) == ("http://vllm:8000/v1", "Qwen2.5-VL-7B", 4)
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+        self.slept: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, s: float) -> None:
+        self.slept.append(s)
+        self.now += s
+
+
+def test_circuit_opens_after_failed_calls_and_recovers_after_cooldown():
+    clock = FakeClock()
+    srv = FakeLLMServer([500, 500, 500, 500, '{"n": 1}', '{"n": 2}'])
+    c = srv.client(clock=clock, sleep=clock.sleep, max_retries=1, breaker_failures=2, breaker_cooldown_s=30)
+    for _ in range(2):
+        with pytest.raises(LLMError, match="unavailable"):
+            c.chat([], prompt_version="t")
+    with pytest.raises(LLMCircuitOpen):
+        c.chat([], prompt_version="t")
+    assert len(srv.requests) == 4  # разомкнутая цепь не ходит в сеть
+    clock.now += 31
+    assert c.chat([], prompt_version="t").text == '{"n": 1}'  # пробный вызов удался — цепь замкнута
+    assert c.chat([], prompt_version="t").text == '{"n": 2}'
+
+
+def test_client_errors_do_not_open_circuit():
+    srv = FakeLLMServer([400, 400, '{"n": 1}'])
+    c = srv.client(breaker_failures=1)
+    for _ in range(2):
+        with pytest.raises(LLMError, match="HTTP 400"):
+            c.chat([], prompt_version="t")
+    assert c.chat([], prompt_version="t").text == '{"n": 1}'
+
+
+def test_rate_limit_spaces_requests():
+    clock = FakeClock()
+    srv = FakeLLMServer(['{"n": 1}'] * 3)
+    c = srv.client(clock=clock, sleep=clock.sleep, rate_limit_rpm=30)
+    for _ in range(3):
+        c.chat([], prompt_version="t")
+    assert clock.slept == [2.0, 2.0]

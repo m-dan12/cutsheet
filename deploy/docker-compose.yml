@@ -193,8 +193,46 @@ services:
       minio-init: { condition: service_completed_successfully }
     restart: unless-stopped
 
-  # Локальная LLM для Script Parser (и Scene Description на этапе 3): docker compose --profile llm up
+  shot-type:
+    build: { context: .., dockerfile: services/shot-type/Dockerfile }
+    image: cutsheet/shot-type:dev
+    environment:
+      <<: *python-env
+      KAFKA_GROUP_ID: shot-type
+      ST_MAX_FRAMES: ${ST_MAX_FRAMES:-5}
+      ST_MODEL_BASE_URL: ${ST_MODEL_BASE_URL:-https://storage.googleapis.com/mediapipe-models}
+    volumes: [mediapipe-models:/models]   # модели MediaPipe скачиваются при первой сцене
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      minio-init: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  # Своя модель: Script Parser нужна текстовая, Scene Description — мультимодальная (FR-LLM2).
+  scene-description:
+    build: { context: .., dockerfile: services/scene-description/Dockerfile }
+    image: cutsheet/scene-description:dev
+    environment:
+      <<: *python-env
+      KAFKA_GROUP_ID: scene-description
+      SDS_MODE: ${SDS_MODE:-llm}            # stub — без LLM, описание-заглушка
+      SDS_MAX_FRAMES: ${SDS_MAX_FRAMES:-3}
+      LLM_BASE_URL: ${SDS_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      LLM_MODEL: ${SDS_LLM_MODEL:-qwen2.5vl:7b}
+      LLM_API_KEY: ${SDS_LLM_API_KEY:-ollama}
+      LLM_STRUCTURED: ${SDS_LLM_STRUCTURED:-json_schema}
+      LLM_TIMEOUT_S: ${SDS_LLM_TIMEOUT_S:-600}
+      LLM_MAX_CONCURRENCY: ${SDS_LLM_MAX_CONCURRENCY:-1}
+      LLM_RATE_LIMIT_RPM: ${SDS_LLM_RATE_LIMIT_RPM:-0}
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      minio-init: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  # Локальная LLM для Script Parser и Scene Description: docker compose --profile llm up
   # После старта: docker compose exec ollama ollama pull qwen2.5:7b-instruct
+  #               docker compose exec ollama ollama pull qwen2.5vl:7b
+  # и SDS_LLM_BASE_URL=http://ollama:11434/v1 (как LLM_BASE_URL)
   ollama:
     image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
     profiles: [llm]
@@ -235,7 +273,10 @@ services:
   aggregator:
     build: { context: .., dockerfile: services/aggregator/Dockerfile }
     image: cutsheet/aggregator:dev
-    environment: *dotnet-env
+    environment:
+      <<: *dotnet-env
+      # Сколько ждать обогащения без единого ответа по проекту, прежде чем сцены станут enrichment_failed (FR-A6).
+      Enrichment__TimeoutMinutes: ${ENRICHMENT_TIMEOUT_MINUTES:-30}
     depends_on:
       postgres: { condition: service_healthy }
       kafka-init: { condition: service_completed_successfully }
@@ -247,4 +288,5 @@ volumes:
   pg-data:
   minio-data:
   whisper-models:
+  mediapipe-models:
   ollama-models:

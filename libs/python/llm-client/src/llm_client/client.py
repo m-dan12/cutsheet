@@ -4,6 +4,8 @@
 - Структурированный вывод (FR-LLM3): ответ разбирается как JSON и проверяется по
   JSON-схеме; при ошибке модель получает текст ошибки и отвечает ещё раз.
 - Ограничение параллелизма: локальная модель упирается в одну GPU.
+- Rate limit (внешний API) и circuit breaker: после серии неудачных вызовов цепь
+  размыкается, и вызовы сразу получают LLMCircuitOpen, пока не пройдёт пауза (FR-SDS4).
 - В лог попадают модель, версия промпта, длительность и токены, но не содержимое (FR-LLM4).
 """
 
@@ -34,6 +36,10 @@ class LLMError(RuntimeError):
 
 class LLMInvalidOutput(LLMError):
     """Модель так и не вернула ответ, проходящий проверку."""
+
+
+class LLMCircuitOpen(LLMError):
+    """Цепь разомкнута: LLM недавно была недоступна, вызов не выполнялся."""
 
 
 @dataclass
@@ -69,17 +75,58 @@ def parse_json(text: str) -> Any:
 
 class LLMClient:
     def __init__(self, config: LLMConfig | None = None, *, transport: httpx.BaseTransport | None = None,
-                 sleep: Callable[[float], None] = time.sleep):
+                 sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic):
         self.config = config or LLMConfig.from_env()
         self._http = httpx.Client(base_url=self.config.base_url, transport=transport,
                                   timeout=httpx.Timeout(self.config.timeout_s, connect=10.0),
                                   headers={"Authorization": f"Bearer {self.config.api_key}"})
         self._sem = threading.BoundedSemaphore(max(1, self.config.max_concurrency))
         self._sleep = sleep
+        self._clock = clock
         self._structured = self.config.structured
+        self._lock = threading.Lock()
+        self._next_slot = 0.0          # rate limit: время, раньше которого запрос не отправляется
+        self._failures = 0             # circuit breaker: неудачных вызовов подряд
+        self._open_until = 0.0         # цепь разомкнута до этого момента
 
     def close(self) -> None:
         self._http.close()
+
+    # ---------- rate limit и circuit breaker ----------
+
+    def _throttle(self) -> None:
+        rpm = self.config.rate_limit_rpm
+        if rpm <= 0:
+            return
+        with self._lock:
+            now = self._clock()
+            slot = max(now, self._next_slot)
+            self._next_slot = slot + 60.0 / rpm
+        if slot > now:
+            self._sleep(slot - now)
+
+    def _check_circuit(self, prompt_version: str) -> None:
+        with self._lock:
+            if self._failures < self.config.breaker_failures:
+                return
+            now = self._clock()
+            if now < self._open_until:
+                raise LLMCircuitOpen(f"LLM circuit open for {self._open_until - now:.0f}s more "
+                                     f"after {self._failures} failed calls")
+            # Пауза прошла: пропускаем пробный вызов; при неудаче цепь снова разомкнётся.
+            self._open_until = now + self.config.breaker_cooldown_s
+        log.info("llm circuit half-open, probing model=%s prompt=%s", self.config.model, prompt_version)
+
+    def _record(self, ok: bool) -> None:
+        with self._lock:
+            if ok:
+                self._failures = 0
+                return
+            self._failures += 1
+            if self._failures >= self.config.breaker_failures:
+                self._open_until = self._clock() + self.config.breaker_cooldown_s
+                log.warning("llm circuit open for %.0fs after %d failed calls model=%s",
+                            self.config.breaker_cooldown_s, self._failures, self.config.model)
 
     # ---------- низкий уровень ----------
 
@@ -90,10 +137,12 @@ class LLMClient:
         if response_format:
             body["response_format"] = response_format
         cfg = self.config
+        self._check_circuit(prompt_version)
         last: Exception | None = None
         for attempt in range(cfg.max_retries + 1):
             if attempt:
                 self._sleep(cfg.backoff_s * 2 ** (attempt - 1))
+            self._throttle()
             started = time.monotonic()
             try:
                 with self._sem:
@@ -110,6 +159,7 @@ class LLMClient:
                             resp.status_code, cfg.model, prompt_version, attempt + 1)
                 continue
             if resp.status_code >= 400:
+                # Ошибка запроса, а не недоступность модели: цепь не размыкаем.
                 raise LLMError(f"HTTP {resp.status_code}: {resp.text[:500]}")
             data = resp.json()
             usage = {k: v for k, v in (data.get("usage") or {}).items() if isinstance(v, int)}
@@ -117,7 +167,9 @@ class LLMClient:
                      cfg.model, prompt_version, duration_ms, usage.get("prompt_tokens"),
                      usage.get("completion_tokens"))
             text = data["choices"][0]["message"].get("content") or ""
+            self._record(ok=True)
             return ChatResult(text=text, duration_ms=duration_ms, usage=usage)
+        self._record(ok=False)
         raise LLMError(f"LLM unavailable after {cfg.max_retries + 1} attempts: {last}")
 
     # ---------- структурированный вывод ----------

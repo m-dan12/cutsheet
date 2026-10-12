@@ -8,7 +8,9 @@
 пользователь входит в клиенте, создаёт проект, загружает видео прямо в MinIO и в реальном
 времени видит найденные планы, и **этап 2** (диалоги): Script Parser размечает сценарий через
 LLM, Transcription & Alignment распознаёт речь и сопоставляет её со сценарием, Aggregator
-режет реплики по сценам и публикует `scene.ready-for-enrichment`, и **этап 4** (редактирование):
+режет реплики по сценам и публикует `scene.ready-for-enrichment`, **этап 3** (обогащение):
+Shot Type определяет крупность плана (MediaPipe), Scene Description описывает план
+мультимодальной LLM, Aggregator собирает оба результата и переводит проект в `ready_for_review`, **этап 4** (редактирование):
 лист правится в клиенте со встроенным плеером, правки защищены `row_version` и переживают
 повторную обработку, и **этап 5** (экспорт): лист с правками выгружается в Excel, Word и PDF.
 
@@ -62,9 +64,10 @@ Export Service (в БД не ходит) кладёт файл рядом (`shee
 | `services/transcription` | **работает**: faster-whisper / WhisperX, нечёткое сопоставление со сценарием |
 | `services/auth` | **работает**: регистрация, вход, JWT RS256 + refresh, JWKS |
 | `services/project-api` | **работает**: проекты, загрузка по presigned URL (multipart, докачка), сцены, SignalR `/hubs/projects` |
-| `services/aggregator` | **работает**: сцены в PostgreSQL, join с диалогами, нарезка реплик по сценам; тесты — `services/aggregator-tests` |
+| `services/shot-type` | **работает**: крупность плана по позе, лицам и объектам (MediaPipe) |
+| `services/scene-description` | **работает**: описание плана мультимодальной LLM по кадрам, репликам и сценарию |
+| `services/aggregator` | **работает**: сцены в PostgreSQL, join с диалогами, нарезка реплик, сбор обогащения, таймаут; тесты — `services/aggregator-tests` |
 | `services/export` | **работает**: монтажный лист в xlsx / docx / pdf из снимка в S3, шаблоны оформления |
-| `services/shot-type`, `scene-description` | Python, заглушки (README с контрактом) |
 | `client/` | **работает**: Flutter Desktop, вход, проекты, загрузка видео, редактор листа, экспорт ([README](client/README.md)) |
 | `tools/` | тестовый ролик и сквозная проверка без клиента |
 
@@ -79,6 +82,7 @@ make dev-install                     # зависимости для тесто�
 make e2e                             # как клиент через Kong: вход → загрузка → SignalR → планы
 make e2e-kafka                       # то же без API: прямо в Kafka и MinIO
 make e2e-dialogues                   # видео + сценарий → script.parsed → dialogue.aligned → scene.ready-for-enrichment
+make e2e-enrichment                  # то же до конца: план и описание каждой сцены → ready_for_review
 make test                            # контрактные и unit-тесты
 ```
 
@@ -88,6 +92,12 @@ make test                            # контрактные и unit-тесты
 `docker compose -f deploy/docker-compose.yml --profile llm up -d` с `LLM_BASE_URL=http://ollama:11434/v1`
 в `deploy/.env`. Без LLM — `SP_MODE=rules` (эвристики). Внешний API — тот же `LLM_BASE_URL`,
 `LLM_MODEL`, `LLM_API_KEY`.
+
+**Описание сцен** — мультимодальная модель, своя для Scene Description: `ollama pull qwen2.5vl:7b`
+(адрес и модель — `SDS_LLM_BASE_URL`, `SDS_LLM_MODEL`; внешний API — теми же переменными и
+`SDS_LLM_API_KEY`). Без LLM — `SDS_MODE=stub`. Сравнение локальной и внешней модели на эталонных
+кадрах — `tools/compare_descriptions.py`. Модели MediaPipe для Shot Type скачиваются при первой
+сцене в том `mediapipe-models`.
 
 **Распознавание речи.** По умолчанию CPU-образ с faster-whisper, модель `small` скачивается
 при первом ролике в том `whisper-models`. С GPU: `TA_EXTRAS=whisperx TA_BACKEND=whisperx TA_MODEL=large-v3`.
