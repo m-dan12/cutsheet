@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cutsheet.local/contracts/events/video.uploaded.v1.json",
+  "title": "video.uploaded v1",
+  "description": "Project API → Scene Detection, Transcription & Alignment. Видео загружено в S3.",
+  "allOf": [
+    {
+      "$ref": "../envelope.v1.json"
+    }
+  ],
+  "properties": {
+    "event_type": {
+      "const": "video.uploaded"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "payload": {
+      "type": "object",
+      "required": [
+        "video_uri",
+        "filename"
+      ],
+      "properties": {
+        "video_uri": {
+          "$ref": "../defs.v1.json#/$defs/s3_uri"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "filename": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

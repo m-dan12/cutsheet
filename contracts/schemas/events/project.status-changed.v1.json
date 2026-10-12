@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cutsheet.local/contracts/events/project.status-changed.v1.json",
+  "title": "project.status-changed v1",
+  "description": "Aggregator → Project API (→ SignalR). Статус пайплайна проекта.",
+  "allOf": [
+    {
+      "$ref": "../envelope.v1.json"
+    }
+  ],
+  "properties": {
+    "event_type": {
+      "const": "project.status-changed"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "payload": {
+      "type": "object",
+      "required": [
+        "stage",
+        "status"
+      ],
+      "properties": {
+        "stage": {
+          "enum": [
+            "upload",
+            "scenes",
+            "dialogue",
+            "enrichment",
+            "review",
+            "export"
+          ]
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "running",
+            "done",
+            "failed",
+            "ready_for_review"
+          ]
+        },
+        "progress": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

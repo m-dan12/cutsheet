@@ -1,0 +1,33 @@
+{
+  "event_id": "00000000-0000-4000-8000-000000000004",
+  "event_type": "dialogue.aligned",
+  "schema_version": 1,
+  "project_id": "3f2b8c1e-5d4a-4e6b-9c7d-1a2b3c4d5e6f",
+  "correlation_id": "9b1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f",
+  "occurred_at": "2026-10-12T10:00:00Z",
+  "payload": {
+    "replicas": [
+      {
+        "start_ms": 1200,
+        "end_ms": 3400,
+        "role": "ИВАН",
+        "text": "Где ты был?",
+        "spoken_text": "Где ты был вчера?",
+        "script_line_id": "s1-l2",
+        "confidence": 0.82,
+        "matched": true
+      },
+      {
+        "start_ms": 5000,
+        "end_ms": 6100,
+        "role": null,
+        "text": "Ну и что?",
+        "spoken_text": "Ну и что?",
+        "script_line_id": null,
+        "confidence": 0.3,
+        "matched": false
+      }
+    ],
+    "language": "ru"
+  }
+}

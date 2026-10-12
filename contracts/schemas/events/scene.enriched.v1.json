@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cutsheet.local/contracts/events/scene.enriched.v1.json",
+  "title": "scene.enriched v1",
+  "description": "Shot Type, Scene Description → Aggregator. Результат обогащения одной сцены.",
+  "allOf": [
+    {
+      "$ref": "../envelope.v1.json"
+    }
+  ],
+  "properties": {
+    "event_type": {
+      "const": "scene.enriched"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "payload": {
+      "type": "object",
+      "required": [
+        "scene_id",
+        "source"
+      ],
+      "properties": {
+        "scene_id": {
+          "$ref": "../defs.v1.json#/$defs/uuid"
+        },
+        "source": {
+          "enum": [
+            "shot_type",
+            "description"
+          ]
+        },
+        "shot_type": {
+          "$ref": "../defs.v1.json#/$defs/shot_type"
+        },
+        "description": {
+          "type": "string"
+        },
+        "confidence": {
+          "$ref": "../defs.v1.json#/$defs/confidence"
+        },
+        "prompt_version": {
+          "type": "string"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "source": {
+              "const": "shot_type"
+            }
+          },
+          "required": [
+            "shot_type"
+          ]
+        },
+        {
+          "properties": {
+            "source": {
+              "const": "description"
+            }
+          },
+          "required": [
+            "description"
+          ]
+        }
+      ]
+    }
+  }
+}

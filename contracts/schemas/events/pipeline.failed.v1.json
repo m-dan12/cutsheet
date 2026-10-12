@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cutsheet.local/contracts/events/pipeline.failed.v1.json",
+  "title": "pipeline.failed v1",
+  "description": "Любой сервис → Aggregator. Невосстановимая ошибка обработки.",
+  "allOf": [
+    {
+      "$ref": "../envelope.v1.json"
+    }
+  ],
+  "properties": {
+    "event_type": {
+      "const": "pipeline.failed"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "payload": {
+      "type": "object",
+      "required": [
+        "service",
+        "error"
+      ],
+      "properties": {
+        "service": {
+          "type": "string"
+        },
+        "source_event_id": {
+          "$ref": "../defs.v1.json#/$defs/uuid"
+        },
+        "source_event_type": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,35 @@
+# Kong DB-less (FR-GW1). Применяется при старте контейнера kong.
+_format_version: "3.0"
+
+services:
+  - name: auth
+    url: http://auth:8080/auth
+    routes:
+      - name: auth
+        paths: ["/api/v1/auth"]   # /api/v1/auth/login -> auth:8080/auth/login
+        strip_path: true
+
+  - name: project-api
+    url: http://project-api:8080
+    routes:
+      - name: project-api
+        paths: ["/api/v1"]
+        strip_path: false
+      - name: project-api-hub          # SignalR (WebSocket), FR-GW2
+        paths: ["/hubs"]
+        strip_path: false
+        protocols: [http, https]
+    # Проверка JWT (FR-GW3) включается на этапе 1, когда Auth Service начнёт выдавать токены.
+    # Плагин jwt в open-source Kong не читает JWKS: публичный ключ Auth Service кладётся
+    # в consumer как rsa_public_key при деплое. Набросок:
+    # plugins:
+    #   - name: jwt
+    #     config: { claims_to_verify: [exp], key_claim_name: iss }
+
+plugins:
+  - name: correlation-id          # FR-GW4: X-Correlation-ID в логах и в запросе к сервису
+    config: { header_name: X-Correlation-ID, generator: uuid, echo_downstream: true }
+  - name: rate-limiting
+    config: { minute: 600, policy: local }
+  - name: cors
+    config: { origins: ["*"], credentials: false }
