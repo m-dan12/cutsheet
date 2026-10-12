@@ -84,9 +84,10 @@ public sealed class EnrichmentCollector(NpgsqlDataSource db, IEventPublisher bus
             ("c", p.TryGetProperty("confidence", out var c) && c.ValueKind == JsonValueKind.Number ? (float)c.GetDouble() : (object)DBNull.Value),
             ("src", e.Producer ?? source), ("pv", (object?)Str("prompt_version") ?? DBNull.Value),
             ("m", (object?)Str("model") ?? DBNull.Value));
-        // Правка пользователя важнее авто-результата (FR-A5): колонку сцены не трогаем.
+        // Правка пользователя важнее авто-результата (FR-A5): колонку сцены не трогаем. row_version растёт,
+        // чтобы клиент с открытым листом увидел, что сцена изменилась (оптимистичная блокировка, этап 4).
         await ExecAsync(conn, $"""
-            UPDATE scenes SET {(source == "shot_type" ? "shot_type" : "description")} = @v
+            UPDATE scenes SET {(source == "shot_type" ? "shot_type" : "description")} = @v, row_version = row_version + 1
             WHERE id = @s AND NOT EXISTS (SELECT 1 FROM user_edits u WHERE u.scene_id = @s AND u.field = @f)
             """, ct, ("s", sceneId), ("f", source), ("v", value.GetString() ?? ""));
 
