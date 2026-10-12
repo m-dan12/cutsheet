@@ -9,9 +9,6 @@ public sealed record StartUploadRequest(string? Kind, string? Filename, long? Si
 public sealed record PartUrl(int PartNumber, string Url);
 public sealed record UploadResponse(Guid UploadId, string Kind, string Status, long SizeBytes, long PartSize,
     int PartCount, List<int> UploadedParts, List<PartUrl> Parts, DateTimeOffset ExpiresAt);
-public sealed record SceneResponse(Guid Id, int Index, long StartMs, long EndMs, string? ShotType, string? Description,
-    string Status, int RowVersion, List<string> KeyframeUrls);
-public sealed record ScenesResponse(Guid ProjectId, double? Fps, long? DurationMs, List<SceneResponse> Scenes);
 
 public static class Endpoints
 {
@@ -35,16 +32,6 @@ public static class Endpoints
 
     public static async Task<IResult> GetProject(Guid id, ClaimsPrincipal user, ProjectStore store, CancellationToken ct) =>
         await store.Get(id, user.UserId(), ct) is { } p ? Results.Ok(p) : Results.NotFound();
-
-    public static async Task<IResult> GetScenes(Guid id, ClaimsPrincipal user, ProjectStore store, ObjectStorage s3,
-        CancellationToken ct)
-    {
-        if (await store.Get(id, user.UserId(), ct) is not { } project) return Results.NotFound();
-        var scenes = await store.Scenes(id, ct);
-        return Results.Ok(new ScenesResponse(id, project.Fps, project.DurationMs, scenes.Select(s =>
-            new SceneResponse(s.Id, s.Index, s.StartMs, s.EndMs, s.ShotType, s.Description, s.Status, s.RowVersion,
-                s.KeyframeUris.Select(s3.PresignGet).ToList())).ToList()));
-    }
 
     /// <summary>
     /// POST /projects/{id}/uploads: начинает multipart-загрузку и выдаёт presigned URL на каждую часть
@@ -145,7 +132,7 @@ public static class Endpoints
             u.PartSize ?? 0, u.PartCount ?? 0, done, urls, DateTimeOffset.UtcNow + s3.UrlLifetime);
     }
 
-    private static async Task SetStatus(ProjectStore store, IHubContext<ProjectsHub> hub, Guid id, string stage,
+    internal static async Task SetStatus(ProjectStore store, IHubContext<ProjectsHub> hub, Guid id, string stage,
         string status, string? error, CancellationToken ct)
     {
         await store.SetStatus(id, stage, status, error, ct);
@@ -154,12 +141,12 @@ public static class Endpoints
     }
 
     // Payload'ы событий (contracts/schemas/events/*.v1.json); имена полей — snake_case.
-    private sealed record VideoUploaded(
+    internal sealed record VideoUploaded(
         [property: System.Text.Json.Serialization.JsonPropertyName("video_uri")] string VideoUri,
         [property: System.Text.Json.Serialization.JsonPropertyName("size_bytes")] long SizeBytes,
         [property: System.Text.Json.Serialization.JsonPropertyName("filename")] string Filename);
 
-    private sealed record ScriptUploaded(
+    internal sealed record ScriptUploaded(
         [property: System.Text.Json.Serialization.JsonPropertyName("script_uri")] string ScriptUri,
         [property: System.Text.Json.Serialization.JsonPropertyName("filename")] string Filename);
 }

@@ -16,6 +16,12 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+/// 409 на правке листа (FR-G5): строку изменили раньше, [current] — её актуальная версия.
+class ConflictException extends ApiException {
+  ConflictException(String message, this.current) : super(409, message);
+  final Scene? current;
+}
+
 /// Клиент Kong (`/api/v1`). Хранит сессию: access-токен в памяти, refresh — в [TokenStore];
 /// при 401 один раз обновляет токен и повторяет запрос (FR-C13).
 class Api extends ChangeNotifier {
@@ -70,6 +76,45 @@ class Api extends ChangeNotifier {
 
   Future<SceneSheet> scenes(String projectId) async =>
       SceneSheet.fromJson(await _json('GET', '/projects/$projectId/scenes') as Map<String, dynamic>);
+
+  // ---------- монтажный лист (этап 4) ----------
+
+  /// PATCH строки: [changes] — изменённые ячейки (`start_ms`, `end_ms`, `shot_type`, `description`)
+  /// и/или `reset: [...]`. Возвращает изменённые строки (при сдвиге границы — и соседей).
+  Future<List<Scene>> patchScene(String projectId, Scene scene, Map<String, Object?> changes) async =>
+      _changes(await _json('PATCH', '/projects/$projectId/scenes/${scene.id}',
+          {'row_version': scene.rowVersion, ...changes}));
+
+  /// Реплики строки целиком: порядок, правки, новые (без id), перенос (id из другой строки).
+  Future<List<Scene>> putReplicas(String projectId, Scene scene, List<Map<String, Object?>> replicas) async =>
+      _changes(await _json('PUT', '/projects/$projectId/scenes/${scene.id}/replicas',
+          {'row_version': scene.rowVersion, 'replicas': replicas}));
+
+  Future<SceneSheet> splitScene(String projectId, Scene scene, int atMs) async => SceneSheet.fromJson(await _json(
+      'POST', '/projects/$projectId/scenes/${scene.id}/split',
+      {'row_version': scene.rowVersion, 'at_ms': atMs}) as Map<String, dynamic>);
+
+  Future<SceneSheet> mergeScene(String projectId, Scene scene, Scene next) async => SceneSheet.fromJson(await _json(
+      'POST', '/projects/$projectId/scenes/${scene.id}/merge',
+      {'row_version': scene.rowVersion, 'next_row_version': next.rowVersion}) as Map<String, dynamic>);
+
+  Future<SceneSheet> deleteScene(String projectId, Scene scene) async => SceneSheet.fromJson(await _json(
+      'DELETE', '/projects/$projectId/scenes/${scene.id}?row_version=${scene.rowVersion}') as Map<String, dynamic>);
+
+  Future<SceneSheet> addScene(String projectId, int startMs, int endMs) async => SceneSheet.fromJson(
+      await _json('POST', '/projects/$projectId/scenes', {'start_ms': startMs, 'end_ms': endMs}) as Map<String, dynamic>);
+
+  /// Режим «без правок» (FR-C12).
+  Future<Project> setReviewRequired(String projectId, bool value) async => Project.fromJson(
+      await _json('PATCH', '/projects/$projectId', {'review_required': value}) as Map<String, dynamic>);
+
+  /// Перезапуск обработки с этапа `scenes` или `dialogue`; правки сохраняются (FR-G7).
+  Future<Project> reprocess(String projectId, String from) async => Project.fromJson(
+      await _json('POST', '/projects/$projectId/reprocess', {'from': from}) as Map<String, dynamic>);
+
+  static List<Scene> _changes(Object? data) => ((data as Map<String, dynamic>)['scenes'] as List)
+      .map((s) => Scene.fromJson(s as Map<String, dynamic>))
+      .toList();
 
   Future<UploadState> startUpload(String projectId,
           {required String kind, required String filename, required int sizeBytes, String? contentType}) async =>
@@ -138,6 +183,11 @@ class Api extends ChangeNotifier {
     final text = utf8.decode(resp.bodyBytes);
     final data = text.isEmpty ? null : jsonDecode(text);
     if (resp.statusCode >= 200 && resp.statusCode < 300) return data;
+    if (resp.statusCode == 409 && data is Map<String, dynamic> && data.containsKey('scene')) {
+      final scene = data['scene'];
+      throw ConflictException(data['title'] as String? ?? 'Строку уже изменили',
+          scene is Map<String, dynamic> ? Scene.fromJson(scene) : null);
+    }
     throw ApiException(resp.statusCode, _problem(resp.statusCode, data));
   }
 

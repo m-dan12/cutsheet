@@ -30,7 +30,8 @@ public sealed class DialogueJoin(NpgsqlDataSource db, IEventPublisher bus, ILogg
         await using var tx = await conn.BeginTransactionAsync(ct);
         var p = e.ProjectId;
 
-        if (await ScalarAsync<long>(conn, "SELECT count(*) FROM projects WHERE id = @p", ct, ("p", p)) == 0)
+        // Блокировка строки проекта: правки листа в Project API идут под той же блокировкой (этап 4).
+        if (await ScalarAsync<object?>(conn, "SELECT 1 FROM projects WHERE id = @p FOR UPDATE", ct, ("p", p)) is null)
         {
             // Проект создаёт Project API; без него join невозможен (FK). Событие пропускаем.
             log.LogWarning("project {ProjectId} not found, {Kind} input ignored", p, kind);
@@ -160,27 +161,36 @@ public sealed class DialogueJoin(NpgsqlDataSource db, IEventPublisher bus, ILogg
     }
 
     /// <summary>
-    /// Авто-реплики заменяются новыми; реплики с правками пользователя остаются (FR-A5), и новая
-    /// реплика с тем же script_line_id не добавляется. Полное слияние правок — этап 4.
+    /// Авто-реплики заменяются новыми; реплики с правками пользователя (включая добавленные, удалённые
+    /// и перенесённые) остаются (FR-A5), и новая реплика на их месте не добавляется: та же
+    /// script_line_id, а для речи вне сценария — пересечение по времени не меньше половины.
     /// </summary>
     private static async Task<int> ReplaceReplicasAsync(NpgsqlConnection conn, Guid p, List<SceneRow> scenes,
         Dictionary<int, List<Replica>> sliced, Dictionary<string, Guid> roleIds, CancellationToken ct)
     {
         await ExecAsync(conn, """
             DELETE FROM replicas r USING scenes s
-            WHERE r.scene_id = s.id AND s.project_id = @p
+            WHERE r.scene_id = s.id AND s.project_id = @p AND r.origin = 'auto' AND NOT r.deleted
               AND NOT EXISTS (SELECT 1 FROM user_edits u WHERE u.replica_id = r.id)
             """, ct, ("p", p));
         var editedLines = new HashSet<string>();
+        var editedSpans = new List<(long Start, long End)>();
         var kept = 0;
-        await using (var cmd = Command(conn, "SELECT r.script_line_id FROM replicas r JOIN scenes s ON s.id = r.scene_id WHERE s.project_id = @p",
-                         ("p", p)))
+        await using (var cmd = Command(conn, """
+                         SELECT r.script_line_id, r.start_ms, r.end_ms FROM replicas r JOIN scenes s ON s.id = r.scene_id
+                         WHERE s.project_id = @p
+                         """, ("p", p)))
         await using (var r = await cmd.ExecuteReaderAsync(ct))
             while (await r.ReadAsync(ct))
             {
                 kept++;
                 if (!r.IsDBNull(0)) editedLines.Add(r.GetString(0));
+                else editedSpans.Add((r.GetInt64(1), r.GetInt64(2)));
             }
+        bool Covered(Replica rep) => rep.ScriptLineId is { } lid
+            ? editedLines.Contains(lid)
+            : editedSpans.Any(e => 2 * (Math.Min(e.End, rep.EndMs) - Math.Max(e.Start, rep.StartMs))
+                                   >= Math.Max(1, Math.Min(e.End - e.Start, rep.EndMs - rep.StartMs)));
 
         await using var copy = await conn.BeginBinaryImportAsync(
             "COPY replicas (id, scene_id, idx, start_ms, end_ms, role_id, text, spoken_text, script_line_id, confidence, matched) FROM STDIN (FORMAT BINARY)",
@@ -190,7 +200,7 @@ public sealed class DialogueJoin(NpgsqlDataSource db, IEventPublisher bus, ILogg
             var idx = 0;
             foreach (var rep in sliced[scene.Span.Index])
             {
-                if (rep.ScriptLineId is { } lid && editedLines.Contains(lid)) continue;
+                if (Covered(rep)) continue;
                 await copy.StartRowAsync(ct);
                 await copy.WriteAsync(Guid.NewGuid(), NpgsqlDbType.Uuid, ct);
                 await copy.WriteAsync(scene.Id, NpgsqlDbType.Uuid, ct);
@@ -208,6 +218,14 @@ public sealed class DialogueJoin(NpgsqlDataSource db, IEventPublisher bus, ILogg
             }
         }
         await copy.CompleteAsync(ct);
+        await copy.DisposeAsync();
+        // Сохранённые реплики и новые — в одном порядке по времени.
+        await ExecAsync(conn, """
+            UPDATE replicas r SET idx = o.rn - 1
+            FROM (SELECT r.id, row_number() OVER (PARTITION BY r.scene_id ORDER BY r.start_ms, r.idx, r.id) AS rn
+                  FROM replicas r JOIN scenes s ON s.id = r.scene_id WHERE s.project_id = @p) o
+            WHERE r.id = o.id AND r.idx <> o.rn - 1
+            """, ct, ("p", p));
         return kept;
     }
 
