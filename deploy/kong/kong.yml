@@ -1,4 +1,5 @@
-# Kong DB-less (FR-GW1). Применяется при старте контейнера kong.
+# Kong DB-less (FR-GW1). Шаблон: kong/start.sh при старте контейнера подставляет публичный ключ
+# Auth Service вместо __AUTH_PUBLIC_KEY__ (плагин jwt в open-source Kong не читает JWKS).
 _format_version: "3.0"
 
 services:
@@ -6,25 +7,40 @@ services:
     url: http://auth:8080/auth
     routes:
       - name: auth
-        paths: ["/api/v1/auth"]   # /api/v1/auth/login -> auth:8080/auth/login
+        paths: ["/api/v1/auth"]   # /api/v1/auth/login -> auth:8080/auth/login; без JWT
         strip_path: true
 
   - name: project-api
     url: http://project-api:8080
     routes:
+      - name: project-api-public  # healthcheck и OpenAPI без токена
+        paths: ["/api/v1/health", "/api/v1/openapi.json"]
+        strip_path: false
       - name: project-api
         paths: ["/api/v1"]
         strip_path: false
-      - name: project-api-hub          # SignalR (WebSocket), FR-GW2
+        plugins:
+          - name: jwt               # FR-GW3
+            config:
+              key_claim_name: iss   # iss токена = key в jwt_secrets ниже
+              claims_to_verify: [exp]
+              uri_param_names: [access_token]   # SignalR по WebSocket передаёт токен в query
+              run_on_preflight: false
+      - name: project-api-hub     # SignalR (WebSocket), FR-GW2
         paths: ["/hubs"]
         strip_path: false
         protocols: [http, https]
-    # Проверка JWT (FR-GW3) включается на этапе 1, когда Auth Service начнёт выдавать токены.
-    # Плагин jwt в open-source Kong не читает JWKS: публичный ключ Auth Service кладётся
-    # в consumer как rsa_public_key при деплое. Набросок:
-    # plugins:
-    #   - name: jwt
-    #     config: { claims_to_verify: [exp], key_claim_name: iss }
+        plugins:
+          - name: jwt
+            config: { key_claim_name: iss, claims_to_verify: [exp], uri_param_names: [access_token], run_on_preflight: false }
+
+consumers:
+  - username: cutsheet-users      # все пользователи Auth Service; user id Project API берёт из sub
+    jwt_secrets:
+      - key: cutsheet-auth
+        algorithm: RS256
+        rsa_public_key: |
+          __AUTH_PUBLIC_KEY__
 
 plugins:
   - name: correlation-id          # FR-GW4: X-Correlation-ID в логах и в запросе к сервису

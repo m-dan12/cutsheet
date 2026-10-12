@@ -9,6 +9,8 @@ RUN dotnet publish -c Release -o /out --no-restore
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 COPY --from=build /out .
+# Каталог ключа подписи JWT: том auth-keys наследует владельца app при первом монтировании.
+RUN mkdir /keys && chown app /keys
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 USER app

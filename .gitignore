@@ -12,6 +12,7 @@ client/**/build/
 client/**/.dart_tool/
 # local env
 deploy/.env
+.sandbox-ca.crt
 .idea/
 .vscode/
 *.mp4
