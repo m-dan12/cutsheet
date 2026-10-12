@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cutsheet.local/contracts/events/export.failed.v1.json",
+  "title": "export.failed v1",
+  "description": "Export Service → Project API. Экспорт не удался.",
+  "allOf": [
+    {
+      "$ref": "../envelope.v1.json"
+    }
+  ],
+  "properties": {
+    "event_type": {
+      "const": "export.failed"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "payload": {
+      "type": "object",
+      "required": [
+        "export_id",
+        "error"
+      ],
+      "properties": {
+        "export_id": {
+          "$ref": "../defs.v1.json#/$defs/uuid"
+        },
+        "error": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

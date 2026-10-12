@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cutsheet.local/contracts/envelope.v1.json",
+  "title": "Конверт события Kafka",
+  "description": "Общий конверт для всех событий (ТЗ 4.1). Payload описывается схемой конкретного события.",
+  "type": "object",
+  "required": ["event_id", "event_type", "schema_version", "project_id", "correlation_id", "occurred_at", "payload"],
+  "properties": {
+    "event_id": { "type": "string", "format": "uuid", "description": "Уникальный id события, ключ дедупликации" },
+    "event_type": { "type": "string", "description": "Совпадает с именем топика" },
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "project_id": { "type": "string", "format": "uuid", "description": "Ключ партиционирования" },
+    "correlation_id": { "type": "string", "format": "uuid", "description": "Сквозной id запуска пайплайна" },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "producer": { "type": "string", "description": "Имя сервиса-продюсера (необязательно)" },
+    "payload": { "type": "object" }
+  }
+}

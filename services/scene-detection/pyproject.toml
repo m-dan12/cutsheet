@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scene-detection"
+version = "0.1.0"
+description = "Scene Detection: границы планов (PySceneDetect) и ключевые кадры"
+requires-python = ">=3.11"
+# scenedetect ставится отдельно с --no-deps, потому что тянет opencv-python с GUI;
+# нам нужен opencv-python-headless (см. Dockerfile и README).
+dependencies = [
+  "cutsheet-common",
+  "opencv-python-headless>=4.10",
+  "numpy",
+  "click",
+  "platformdirs",
+  "tqdm",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+scene-detection = "scene_detection.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

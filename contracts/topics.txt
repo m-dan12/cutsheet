@@ -1,0 +1,15 @@
+# Реестр топиков Kafka (этап 0). Формат: <топик> <партиции> <retention.ms>
+# Топик = event_type. 7 суток = 604800000 мс (ТЗ, раздел 8).
+# DLQ-топики (<topic>.dlq, 30 суток) добавляются на этапе 6.
+video.uploaded              3 604800000
+script.uploaded             3 604800000
+scenes.detected             3 604800000
+script.parsed               3 604800000
+dialogue.aligned            3 604800000
+scene.ready-for-enrichment  3 604800000
+scene.enriched              3 604800000
+export.requested            3 604800000
+export.completed            3 604800000
+export.failed               3 604800000
+project.status-changed      3 604800000
+pipeline.failed             3 604800000

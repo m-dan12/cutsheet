@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cutsheet.local/contracts/events/dialogue.aligned.v1.json",
+  "title": "dialogue.aligned v1",
+  "description": "Transcription & Alignment → Aggregator. Реплики с таймкодами и ролями.",
+  "allOf": [
+    {
+      "$ref": "../envelope.v1.json"
+    }
+  ],
+  "properties": {
+    "event_type": {
+      "const": "dialogue.aligned"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "payload": {
+      "type": "object",
+      "required": [
+        "replicas"
+      ],
+      "properties": {
+        "replicas": {
+          "type": "array",
+          "items": {
+            "$ref": "../defs.v1.json#/$defs/replica"
+          }
+        },
+        "language": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

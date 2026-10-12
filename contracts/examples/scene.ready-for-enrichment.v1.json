@@ -1,0 +1,29 @@
+{
+  "event_id": "00000000-0000-4000-8000-000000000005",
+  "event_type": "scene.ready-for-enrichment",
+  "schema_version": 1,
+  "project_id": "3f2b8c1e-5d4a-4e6b-9c7d-1a2b3c4d5e6f",
+  "correlation_id": "9b1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f",
+  "occurred_at": "2026-10-12T10:00:00Z",
+  "payload": {
+    "scene_id": "7c6d5e4f-3a2b-4c1d-9e8f-7a6b5c4d3e2f",
+    "index": 0,
+    "start_ms": 0,
+    "end_ms": 4000,
+    "keyframe_uris": [
+      "s3://cutsheet/projects/3f2b8c1e-5d4a-4e6b-9c7d-1a2b3c4d5e6f/frames/scene_00000_0.jpg"
+    ],
+    "replicas": [
+      {
+        "start_ms": 1200,
+        "end_ms": 3400,
+        "role": "ИВАН",
+        "text": "Где ты был?",
+        "spoken_text": "Где ты был вчера?",
+        "script_line_id": "s1-l2",
+        "confidence": 0.82,
+        "matched": true
+      }
+    ]
+  }
+}

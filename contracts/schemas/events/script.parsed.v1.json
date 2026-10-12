@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cutsheet.local/contracts/events/script.parsed.v1.json",
+  "title": "script.parsed v1",
+  "description": "Script Parser → Transcription & Alignment. Структура сценария.",
+  "allOf": [
+    {
+      "$ref": "../envelope.v1.json"
+    }
+  ],
+  "properties": {
+    "event_type": {
+      "const": "script.parsed"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "payload": {
+      "type": "object",
+      "required": [
+        "script_scenes",
+        "roles"
+      ],
+      "properties": {
+        "script_scenes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "index",
+              "heading",
+              "lines"
+            ],
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "heading": {
+                "type": "string"
+              },
+              "lines": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "line_id",
+                    "kind",
+                    "text"
+                  ],
+                  "properties": {
+                    "line_id": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "dialogue",
+                        "action"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "prompt_version": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

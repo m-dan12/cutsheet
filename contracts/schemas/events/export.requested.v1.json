@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cutsheet.local/contracts/events/export.requested.v1.json",
+  "title": "export.requested v1",
+  "description": "Project API → Export Service. Снимок листа (с правками) уже лежит в S3.",
+  "allOf": [
+    {
+      "$ref": "../envelope.v1.json"
+    }
+  ],
+  "properties": {
+    "event_type": {
+      "const": "export.requested"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "payload": {
+      "type": "object",
+      "required": [
+        "export_id",
+        "format",
+        "snapshot_uri"
+      ],
+      "properties": {
+        "export_id": {
+          "$ref": "../defs.v1.json#/$defs/uuid"
+        },
+        "format": {
+          "enum": [
+            "xlsx",
+            "docx",
+            "pdf"
+          ]
+        },
+        "snapshot_uri": {
+          "$ref": "../defs.v1.json#/$defs/s3_uri"
+        },
+        "options": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}

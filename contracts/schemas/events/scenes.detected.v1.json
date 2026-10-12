@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cutsheet.local/contracts/events/scenes.detected.v1.json",
+  "title": "scenes.detected v1",
+  "description": "Scene Detection → Aggregator. Границы сцен (планов) без дыр, от 0 до конца видео.",
+  "allOf": [
+    {
+      "$ref": "../envelope.v1.json"
+    }
+  ],
+  "properties": {
+    "event_type": {
+      "const": "scenes.detected"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "payload": {
+      "type": "object",
+      "required": [
+        "fps",
+        "duration_ms",
+        "scenes"
+      ],
+      "properties": {
+        "fps": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "duration_ms": {
+          "$ref": "../defs.v1.json#/$defs/ms"
+        },
+        "scenes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "index",
+              "start_ms",
+              "end_ms",
+              "keyframe_uris"
+            ],
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "start_ms": {
+                "$ref": "../defs.v1.json#/$defs/ms"
+              },
+              "end_ms": {
+                "$ref": "../defs.v1.json#/$defs/ms"
+              },
+              "keyframe_uris": {
+                "type": "array",
+                "items": {
+                  "$ref": "../defs.v1.json#/$defs/s3_uri"
+                }
+              }
+            }
+          },
+          "minItems": 1
+        },
+        "detector": {
+          "type": "object",
+          "description": "Параметры детектора, для воспроизводимости"
+        }
+      }
+    }
+  }
+}

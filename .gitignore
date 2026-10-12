@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+# .NET
+bin/
+obj/
+# Flutter
+client/**/build/
+client/**/.dart_tool/
+# local env
+deploy/.env
+.idea/
+.vscode/
+*.mp4

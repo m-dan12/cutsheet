@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cutsheet.local/contracts/defs.v1.json",
+  "title": "Общие определения",
+  "$defs": {
+    "s3_uri": { "type": "string", "pattern": "^s3://[a-z0-9.-]+/.+" },
+    "uuid": { "type": "string", "format": "uuid" },
+    "ms": { "type": "integer", "minimum": 0, "description": "Миллисекунды от начала видео" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "shot_type": { "type": "string", "enum": ["wide", "medium", "close", "detail", "unknown"], "description": "общий / средний / крупный / деталь / не определён" },
+    "replica": {
+      "type": "object",
+      "required": ["start_ms", "end_ms", "role", "text"],
+      "properties": {
+        "start_ms": { "$ref": "#/$defs/ms" },
+        "end_ms": { "$ref": "#/$defs/ms" },
+        "role": { "type": ["string", "null"], "description": "null — неизвестный говорящий" },
+        "text": { "type": "string" },
+        "spoken_text": { "type": "string" },
+        "script_line_id": { "type": ["string", "null"] },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "matched": { "type": "boolean" }
+      }
+    }
+  }
+}
