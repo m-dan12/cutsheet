@@ -14,16 +14,16 @@ import io
 import sys
 import urllib.request
 import uuid
-import zipfile
 from pathlib import Path
 
+from docx import Document  # openpyxl и python-docx ставит make dev-install (services/export[test])
+from openpyxl import load_workbook
 from websockets.sync.client import connect
 
 from e2e_api import Hub, call, upload_video, wait_scenes_done
 
 EDIT = "Правка перед экспортом"
 MAGIC = {"xlsx": b"PK", "docx": b"PK", "pdf": b"%PDF"}
-TEXT_PART = {"xlsx": "xl/sharedStrings.xml", "docx": "word/document.xml"}
 
 
 def wait_exports(hub: Hub, ids: set[str], timeout: float) -> dict[str, dict]:
@@ -38,6 +38,14 @@ def wait_exports(hub: Hub, ids: set[str], timeout: float) -> dict[str, dict]:
             if done.keys() == ids:
                 break
     return done
+
+
+def text_of(fmt: str, data: bytes) -> str:
+    if fmt == "xlsx":
+        ws = load_workbook(io.BytesIO(data)).active
+        return "\n".join(str(v) for row in ws.iter_rows(values_only=True) for v in row if v is not None)
+    doc = Document(io.BytesIO(data))
+    return "\n".join([p.text for p in doc.paragraphs] + [c.text for t in doc.tables for r in t.rows for c in r.cells])
 
 
 def download(url: str) -> tuple[bytes, str]:
@@ -93,15 +101,15 @@ def main() -> int:
         data, disposition = download(e["download_url"])
         assert data.startswith(MAGIC[fmt]), (fmt, data[:8])
         assert "filename*=UTF-8''" in disposition and e["filename"].endswith(f".{fmt}"), disposition
-        if fmt in TEXT_PART:
-            text = zipfile.ZipFile(io.BytesIO(data)).read(TEXT_PART[fmt]).decode("utf-8")
+        if fmt != "pdf":
+            text = text_of(fmt, data)
             assert EDIT in text and "крупный" in text, f"{fmt}: в файле нет правки пользователя"
         print(f"{fmt}: {len(data)} байт, правка пользователя в файле")
 
     failed = call("GET", f"{api}/projects/{pid}/exports/{bad}", token=token)
     assert failed["status"] == "failed" and "template not found" in failed["error"], failed
     data, _ = download(call("GET", f"{api}/projects/{pid}/exports/{compact}", token=token)["download_url"])
-    text = zipfile.ZipFile(io.BytesIO(data)).read("word/document.xml").decode("utf-8")
+    text = text_of("docx", data)
     assert "Монтажный лист (диалоги)" in text and EDIT not in text, "шаблон compact не применился"
     print("неизвестный шаблон: export.failed; шаблон compact из каталога шаблонов: OK")
 
