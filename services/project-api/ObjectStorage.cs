@@ -53,14 +53,36 @@ public sealed class ObjectStorage : IDisposable
             Expires = DateTime.UtcNow + UrlLifetime, Protocol = _publicHttp ? Protocol.HTTP : Protocol.HTTPS,
         });
 
-    public string PresignGet(string uri)
+    public string PresignGet(string uri) => PresignGet(uri, null);
+
+    /// <param name="downloadName">Имя файла при скачивании (Content-Disposition: attachment).</param>
+    public string PresignGet(string uri, string? downloadName)
     {
         var (bucket, key) = Parse(uri);
-        return _public.GetPreSignedURL(new GetPreSignedUrlRequest
+        var request = new GetPreSignedUrlRequest
         {
             BucketName = bucket, Key = key, Verb = HttpVerb.GET,
             Expires = DateTime.UtcNow + UrlLifetime, Protocol = _publicHttp ? Protocol.HTTP : Protocol.HTTPS,
-        });
+        };
+        if (downloadName is not null)
+            request.ResponseHeaderOverrides.ContentDisposition = ContentDisposition(downloadName);
+        return _public.GetPreSignedURL(request);
+    }
+
+    /// <summary>attachment с ASCII-именем и RFC 5987 filename* для кириллицы.</summary>
+    public static string ContentDisposition(string filename)
+    {
+        var ascii = new string(filename.Select(c => c is >= ' ' and < (char)127 and not '"' and not '\\' ? c : '_').ToArray());
+        return $"attachment; filename=\"{ascii}\"; filename*=UTF-8''{System.Uri.EscapeDataString(filename)}";
+    }
+
+    public async Task<string> PutBytes(string key, byte[] data, string contentType, CancellationToken ct)
+    {
+        await _internal.PutObjectAsync(new PutObjectRequest
+        {
+            BucketName = Bucket, Key = key, ContentType = contentType, InputStream = new MemoryStream(data),
+        }, ct);
+        return Uri(Bucket, key);
     }
 
     /// <summary>Уже загруженные части multipart-загрузки (для докачки и завершения).</summary>

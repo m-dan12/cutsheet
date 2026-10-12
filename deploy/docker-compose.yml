@@ -180,6 +180,19 @@ services:
       minio-init: { condition: service_completed_successfully }
     restart: unless-stopped
 
+  export:
+    build: { context: .., dockerfile: services/export/Dockerfile }
+    image: cutsheet/export:dev
+    environment:
+      <<: *python-env
+      KAFKA_GROUP_ID: export
+    # Свои шаблоны оформления (FR-E7): <имя>.json, без пересборки образа.
+    volumes: [./export-templates:/templates:ro]
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      minio-init: { condition: service_completed_successfully }
+    restart: unless-stopped
+
   shot-type:
     build: { context: .., dockerfile: services/shot-type/Dockerfile }
     image: cutsheet/shot-type:dev

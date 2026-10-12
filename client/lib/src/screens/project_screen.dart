@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../api.dart';
+import '../export_controller.dart';
 import '../hub.dart';
 import '../models.dart';
 import '../scene_player.dart';
@@ -15,8 +16,8 @@ import '../uploader.dart';
 import 'sheet_view.dart';
 import 'status_chip.dart';
 
-/// Карточка проекта: загрузка видео, статус пайплайна в реальном времени и редактор монтажного
-/// листа со встроенным плеером (этап 4).
+/// Карточка проекта: загрузка видео, статус пайплайна в реальном времени, редактор монтажного
+/// листа со встроенным плеером (этап 4) и экспорт в xlsx / docx / pdf (этап 5).
 class ProjectScreen extends StatefulWidget {
   const ProjectScreen({super.key, required this.api, required this.project});
   final Api api;
@@ -28,8 +29,9 @@ class ProjectScreen extends StatefulWidget {
 
 class _ProjectScreenState extends State<ProjectScreen> {
   late Project _project = widget.project;
-  late final ProjectHub _hub = ProjectHub(widget.api, _project.id, _onStatus);
+  late final ProjectHub _hub = ProjectHub(widget.api, _project.id, _onStatus, onExport: (u) => _exports.onUpdate(u));
   late final SheetController _sheet = SheetController(widget.api, _project.id, onNotice: _notice);
+  late final ExportController _exports = ExportController(widget.api, _project.id, onNotice: _notice);
   ScenePlayer? _player;
   String? _selectedId;
   Uploader? _uploader;
@@ -44,11 +46,13 @@ class _ProjectScreenState extends State<ProjectScreen> {
       if (mounted) setState(() => _hubError = 'Статусы в реальном времени недоступны: $e');
     });
     _refresh();
+    _exports.load();
   }
 
   @override
   void dispose() {
     _hub.close();
+    _exports.dispose();
     _uploader?.dispose();
     _sheet.dispose();
     _player?.dispose();
@@ -105,6 +109,19 @@ class _ProjectScreenState extends State<ProjectScreen> {
     }
   }
 
+  /// Скачивание готового экспорта: пользователь выбирает, куда сохранить файл.
+  Future<void> _saveExport(ExportJob job) async {
+    final bytes = await _exports.fetch(job);
+    if (bytes == null) return;
+    try {
+      final saved = await FilePicker.saveFile(dialogTitle: 'Сохранить монтажный лист', fileName: job.filename,
+          bytes: bytes, type: FileType.custom, allowedExtensions: [job.format]);
+      if (saved != null) _notice('Сохранено: ${saved.toFilePath()}');
+    } catch (e) {
+      _notice('Не удалось сохранить файл: $e');
+    }
+  }
+
   Future<void> _pickVideo() async {
     final files = await FilePicker.pickFiles(dialogTitle: 'Видео фильма', type: FileType.video);
     final path = files.firstOrNull?.path;
@@ -157,6 +174,19 @@ class _ProjectScreenState extends State<ProjectScreen> {
                 ),
             ]),
           ),
+          ListenableBuilder(
+            listenable: _sheet,
+            // FR-C12: экспорт доступен, как только в листе есть строки; ревью необязательно.
+            builder: (_, _) => PopupMenuButton<String>(
+              tooltip: 'Экспорт монтажного листа',
+              icon: const Icon(Icons.file_download_outlined),
+              enabled: _sheet.sheet?.scenes.isNotEmpty ?? false,
+              onSelected: _exports.request,
+              itemBuilder: (_) => [
+                for (final f in ExportController.formats.entries) PopupMenuItem(value: f.key, child: Text(f.value)),
+              ],
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: StatusChip(stage: _project.stage, status: _project.status),
@@ -187,6 +217,12 @@ class _ProjectScreenState extends State<ProjectScreen> {
                         'Чтобы править, выключите переключатель.',
                     color: Theme.of(context).colorScheme.secondaryContainer)
                 : const SizedBox.shrink(),
+          ),
+          ListenableBuilder(
+            listenable: _exports,
+            builder: (_, _) => _exports.jobs.isEmpty
+                ? const SizedBox.shrink()
+                : ExportBar(controller: _exports, onSave: _saveExport),
           ),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -303,4 +339,49 @@ class _PlayerPanel extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Последние экспорты: формат, статус и кнопка «Сохранить» у готовых.
+class ExportBar extends StatelessWidget {
+  const ExportBar({super.key, required this.controller, required this.onSave, this.limit = 3});
+  final ExportController controller;
+  final void Function(ExportJob job) onSave;
+  final int limit;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      color: scheme.surfaceContainerHighest,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: Wrap(
+        spacing: 16,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          const Text('Экспорт:'),
+          for (final job in controller.jobs.take(limit))
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Text('${job.format.toUpperCase()} ${_time(job.createdAt)}'),
+              const SizedBox(width: 8),
+              if (job.pending || controller.isSaving(job))
+                const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              else if (job.status == 'completed')
+                TextButton.icon(
+                  onPressed: () => onSave(job),
+                  icon: const Icon(Icons.save_alt, size: 18),
+                  label: const Text('Сохранить'),
+                )
+              else
+                Tooltip(
+                  message: job.error ?? '',
+                  child: Text('ошибка', style: TextStyle(color: scheme.error)),
+                ),
+            ]),
+        ],
+      ),
+    );
+  }
+
+  static String _time(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 }

@@ -310,3 +310,57 @@ class UploadState {
   final List<int> uploadedParts;
   final List<PartUrl> parts;
 }
+
+/// Экспорт листа (GET /projects/{id}/exports/{exportId}). [downloadUrl] есть только у готового.
+class ExportJob {
+  ExportJob({
+    required this.id,
+    required this.format,
+    required this.status,
+    this.error,
+    this.downloadUrl,
+    required this.filename,
+    required this.createdAt,
+  });
+
+  factory ExportJob.fromJson(Map<String, dynamic> j) => ExportJob(
+        id: j['id'] as String,
+        format: j['format'] as String,
+        status: j['status'] as String,
+        error: j['error'] as String?,
+        downloadUrl: j['download_url'] as String?,
+        filename: j['filename'] as String,
+        createdAt: DateTime.parse(j['created_at'] as String).toLocal(),
+      );
+
+  final String id;
+
+  /// xlsx, docx или pdf.
+  final String format;
+
+  /// requested, completed или failed.
+  final String status;
+  final String? error;
+  final String? downloadUrl;
+  final String filename;
+  final DateTime createdAt;
+
+  bool get pending => status == 'requested';
+}
+
+/// Сообщение хаба "export": экспорт запрошен, готов или не удался.
+class ExportUpdate {
+  ExportUpdate({required this.exportId, required this.format, required this.status, this.error});
+
+  factory ExportUpdate.fromJson(Map<String, dynamic> j) => ExportUpdate(
+        exportId: j['export_id'] as String,
+        format: j['format'] as String,
+        status: j['status'] as String,
+        error: j['error'] as String?,
+      );
+
+  final String exportId;
+  final String format;
+  final String status;
+  final String? error;
+}
