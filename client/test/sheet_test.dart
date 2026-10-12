@@ -107,6 +107,40 @@ void main() {
     expect(notices.single, contains('Строку 2 уже изменили'));
   });
 
+  test('409 при правке ячейки отдаёт выбор пользователю: обе версии и несохранённая правка', () async {
+    final conflicts = <(String?, Map<String, Object?>)>[];
+    final client = MockClient((req) async {
+      final auth = await login(req);
+      if (auth != null) return auth;
+      if (req.method == 'GET') return json(sheetJson());
+      return json({
+        'title': 'Строку уже изменили: версия устарела',
+        'scene': sceneJson('b', 1, 2000, 5000, version: 7, description: 'с сервера'),
+      }, 409);
+    });
+    final notices = <String>[];
+    final c = SheetController(await signedIn(client), 'p',
+        onNotice: notices.add, onConflict: (current, changes) => conflicts.add((current.description, changes)));
+    await c.load();
+    expect(await c.patch('b', {'description': 'моё'}), isFalse);
+    expect(conflicts.single.$1, 'с сервера');
+    expect(conflicts.single.$2, {'description': 'моё'});
+    expect(c.scene('b')!.rowVersion, 7);
+    expect(notices, isEmpty);
+  });
+
+  test('фильтры листа: проверить и изменённые', () {
+    final low = Scene.fromJson(sceneJson('a', 0, 0, 2000, auto: {
+      'shot_type': {'value': 'close', 'confidence': 0.3, 'source': 'shot_type'},
+    }));
+    final edited = Scene.fromJson(sceneJson('b', 1, 2000, 5000, description: 'Улица', edited: ['description']));
+    expect(needsReview(low), isTrue);
+    expect(needsReview(edited), isFalse);
+    expect(editedByUser(edited), isTrue);
+    expect(matchesFilter(edited, SheetFilter.all, 'улиц'), isTrue);
+    expect(matchesFilter(low, SheetFilter.edited, ''), isFalse);
+  });
+
   test('модель: отметки правок, расхождение с автоматикой, низкая уверенность', () {
     final s = Scene.fromJson(sceneJson('a', 0, 0, 2000, shot: 'close', description: 'моё', edited: ['description'], auto: {
       'description': {'value': 'авто', 'confidence': 0.9, 'source': 'description'},

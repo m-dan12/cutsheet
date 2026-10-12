@@ -1,5 +1,5 @@
 name: cutsheet_client
-description: "A new Flutter project."
+description: "CutSheet: настольный клиент монтажных листов."
 publish_to: 'none'
 version: 0.1.0+1
 
@@ -13,6 +13,7 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   flutter_secure_storage: ^11.2.0
+  flutter_svg: ^2.3.0
   http: ^1.6.0
   media_kit: ^1.2.6
   media_kit_libs_video: ^1.0.7
@@ -26,3 +27,20 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # Шрифты дизайна (OFL, см. fonts/OFL-*.txt): Lora — заголовки, Carlito (Lato с кириллицей) —
+  # интерфейс и таблица, IBM Plex Mono — таймкоды.
+  fonts:
+    - family: Lora
+      fonts:
+        - asset: fonts/Lora-SemiBold.ttf
+          weight: 600
+    - family: Carlito
+      fonts:
+        - asset: fonts/Carlito-Regular.ttf
+        - asset: fonts/Carlito-Bold.ttf
+          weight: 700
+    - family: IBM Plex Mono
+      fonts:
+        - asset: fonts/IBMPlexMono-Regular.ttf
+        - asset: fonts/IBMPlexMono-Medium.ttf
+          weight: 500

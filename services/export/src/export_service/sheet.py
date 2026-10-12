@@ -75,6 +75,10 @@ def build_sheet(snapshot: dict[str, Any], template: dict[str, Any], options: dic
         raise KeyError(key)
 
     columns = [Column(c["key"], c["title"], float(c["width"])) for c in template["columns"]]
+    # options.columns: какие колонки шаблона оставить (выбор в клиенте); пустой выбор игнорируется.
+    wanted = options.get("columns")
+    if isinstance(wanted, list) and (picked := [c for c in columns if c.key in wanted]):
+        columns = picked
     rows = [[cell(c.key, s) for c in columns] for s in scenes]
     return Sheet(
         title=template["title"],

@@ -35,6 +35,13 @@ def test_options_override_timecode(snapshot):
     assert sheet.rows[1][2] == "00:00:05.400"
 
 
+def test_options_pick_columns(snapshot):
+    sheet = build_sheet(snapshot, Templates().get(), {"columns": ["number", "description", "nope"]})
+    assert [c.key for c in sheet.columns] == ["number", "description"]
+    assert sheet.rows[1] == ["2", "Иван смотрит на небо."]
+    assert len(build_sheet(snapshot, Templates().get(), {"columns": []}).columns) == 6
+
+
 def test_custom_template_overrides_default(tmp_path, snapshot):
     (tmp_path / "short.json").write_text(json.dumps({
         "columns": [{"key": "number", "title": "#", "width": 3}, {"key": "duration", "title": "Длит.", "width": 8}],
