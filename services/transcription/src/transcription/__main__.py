@@ -14,7 +14,8 @@ def main() -> None:
     s = Settings.from_env()
     storage = Storage()
     storage.ensure_bucket(s.bucket)
-    service = TranscriptionService(storage, s, make_transcriber(s.backend, s.model, s.device, s.compute_type))
+    service = TranscriptionService(storage, s, make_transcriber(
+        s.backend, s.model, s.device, s.compute_type, s.gigaam_model, s.gigaam_timing, s.gigaam_dir))
     KafkaBus(SERVICE).run(["video.uploaded", "script.parsed"], service.handle)
 
 

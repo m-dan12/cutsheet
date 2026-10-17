@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "transcription"
 version = "0.1.0"
-description = "Transcription & Alignment: распознавание речи (faster-whisper / WhisperX) и сопоставление со сценарием"
+description = "Transcription & Alignment: распознавание речи (faster-whisper / WhisperX / GigaAM) и сопоставление со сценарием"
 requires-python = ">=3.11"
 dependencies = [
   "cutsheet-common",
@@ -16,6 +16,8 @@ dependencies = [
 # CPU-образ: faster-whisper (CTranslate2, без torch). GPU и пословное выравнивание wav2vec2 — whisperx.
 whisper = ["faster-whisper>=1.1,<2"]
 whisperx = ["whisperx>=3.3"]
+# GigaAM v3 есть только в репозитории (на PyPI — старая v2); faster-whisper нужен для таймкодов слов и VAD.
+gigaam = ["faster-whisper>=1.1,<2", "gigaam @ git+https://github.com/salute-developers/GigaAM.git"]
 test = ["pytest>=8"]
 
 [project.scripts]

@@ -189,7 +189,9 @@ services:
     build:
       context: ..
       dockerfile: services/transcription/Dockerfile
-      args: { TA_EXTRAS: "${TA_EXTRAS:-whisper}" }   # whisperx — GPU-образ
+      args:   # whisperx — GPU-образ; gigaam (+ TORCH_INDEX=https://download.pytorch.org/whl/cpu для CPU)
+        TA_EXTRAS: "${TA_EXTRAS:-whisper}"
+        TORCH_INDEX: "${TORCH_INDEX:-}"
     image: cutsheet/transcription:dev
     healthcheck: *python-health
     environment:
@@ -200,7 +202,9 @@ services:
       TA_DEVICE: ${TA_DEVICE:-auto}
       TA_COMPUTE_TYPE: ${TA_COMPUTE_TYPE:-default}
       TA_LANGUAGE: ${TA_LANGUAGE-ru}
-    volumes: [whisper-models:/models]   # модели Whisper скачиваются при первом запуске
+      TA_GIGAAM_MODEL: ${TA_GIGAAM_MODEL:-v3_e2e_rnnt}
+      TA_GIGAAM_TIMING: ${TA_GIGAAM_TIMING:-whisper}
+    volumes: [whisper-models:/models]   # модели Whisper и GigaAM скачиваются при первом запуске
     depends_on:
       kafka-init: { condition: service_completed_successfully }
       minio-init: { condition: service_completed_successfully }
