@@ -2,7 +2,8 @@
 
 Бэкенды выбираются конфигурацией (TA_BACKEND):
 - faster-whisper — CTranslate2, работает на CPU без torch; образ по умолчанию;
-- whisperx — faster-whisper + пословное выравнивание wav2vec2, точнее границы слов; нужен GPU.
+- whisperx — faster-whisper + пословное выравнивание wav2vec2, точнее границы слов; нужен GPU;
+- gigaam — текст от GigaAM (Сбер), таймкоды слов от Whisper или по VAD (giga.py).
 Модели загружаются лениво и один раз на процесс.
 """
 
@@ -97,7 +98,13 @@ class WhisperXTranscriber:
         return Transcript(lang, self.name, words)
 
 
-def make_transcriber(backend: str, model: str, device: str, compute_type: str) -> Transcriber:
+def make_transcriber(backend: str, model: str, device: str, compute_type: str, gigaam_model: str = "v3_e2e_rnnt",
+                     gigaam_timing: str = "whisper", gigaam_dir: str | None = None) -> Transcriber:
+    if backend == "gigaam":
+        from .giga import GigaAMTranscriber
+
+        whisper = FasterWhisperTranscriber(model, device, compute_type) if gigaam_timing == "whisper" else None
+        return GigaAMTranscriber(gigaam_model, device, gigaam_timing, whisper, gigaam_dir)
     if backend == "faster-whisper":
         return FasterWhisperTranscriber(model, device, compute_type)
     if backend == "whisperx":

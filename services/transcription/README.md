@@ -23,13 +23,24 @@
 
 | Переменная | По умолчанию | |
 |---|---|---|
-| `TA_BACKEND` | `faster-whisper` | или `whisperx` (образ с `TA_EXTRAS=whisperx`) |
-| `TA_MODEL` | `small` | на GPU — `large-v3` (ТЗ 9, п. 8) |
+| `TA_BACKEND` | `faster-whisper` | `whisperx` (образ с `TA_EXTRAS=whisperx`) или `gigaam` (`TA_EXTRAS=gigaam`) |
+| `TA_MODEL` | `small` | модель Whisper; на GPU — `large-v3` (ТЗ 9, п. 8) |
+| `TA_GIGAAM_MODEL` | `v3_e2e_rnnt` | модель GigaAM (`v3_e2e_ctc`, `v3_rnnt`, `v3_ctc`, …) |
+| `TA_GIGAAM_TIMING` | `whisper` | откуда таймкоды слов для GigaAM: `whisper` или `vad` |
 | `TA_DEVICE` | `auto` | `cpu` / `cuda` |
 | `TA_COMPUTE_TYPE` | `default` | `int8` для CPU, `float16` для GPU |
 | `TA_LANGUAGE` | `ru` | пусто — автоопределение |
 
 Модели Whisper скачиваются с Hugging Face при первом распознавании в том `whisper-models`.
+
+**GigaAM** (`giga.py`) — русская модель Сбера, на обычной русской речи заметно точнее Whisper,
+но отдаёт только текст фрагментов до 25 с, без таймкодов слов. Поэтому речь режется на
+фрагменты до 22 с по словам Whisper (`TA_GIGAAM_TIMING=whisper`, модель — `TA_MODEL`) или по
+Silero VAD (`vad`), каждый фрагмент распознаёт GigaAM, а таймкоды его слов переносятся с
+совпавших слов Whisper; несовпавшие слова и режим `vad` получают таймкоды пропорционально
+длине слова. Это вариант G2 эксперимента 03а. Образ для CPU:
+`TA_EXTRAS=gigaam TORCH_INDEX=https://download.pytorch.org/whl/cpu` (torch без CUDA). Веса
+GigaAM качаются с CDN Сбера в `/models/gigaam`.
 
 GPU-образ: `TA_EXTRAS=whisperx` ставит whisperx с torch. Для работы на GPU в Docker нужен
 NVIDIA Container Toolkit (в WSL 2 — драйвер NVIDIA для Windows) и `gpus: all` у сервиса;
